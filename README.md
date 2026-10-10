@@ -35,3 +35,32 @@ go run -tags "desktop,dev" .
 ```
 
 Wails 应用在 Windows 上必须包含 `desktop` 和 `dev` 构建标签；裸跑 `go run .` 或 `go build .` 会显示“Wails applications will not build without the correct build tags”提示框。也可以使用 Wails CLI：`wails dev`。发布构建使用 `wails build`。
+
+打包安装包（需要 `makensis` 在 PATH 里）：
+
+```bash
+wails build -nsis -clean -platform windows/amd64
+```
+
+## 版本号与发版
+
+版本号只在 `wails.json` 的 `info.productVersion` 里写一次，三处都由它推导：
+
+| 消费方 | 说明 |
+| --- | --- |
+| exe 版本资源 | wails 构建时写进 PE 资源，资源管理器属性页看到的版本 |
+| 界面上的版本 | `frontend/vite.config.js` 通过 `define` 注入 `__APP_VERSION__` |
+| tag 与安装包名 | `.cnb.yml` 流水线读取后拼成 `V<版本号>` |
+
+发一个新版本：
+
+1. 改 `wails.json` 的 `info.productVersion`（顺手同步 `frontend/package.json` 的 `version`）
+2. 版本说明写进 `docs/releases/<版本号>.md`（Release 页的正文就是它，不写就退回 tag 附注）
+3. 提交并推送到 GitHub 与 CNB
+4. 推标签：`git tag -a V0.2.0 -m "0.2.0" && git push cnb refs/tags/V0.2.0`
+
+之后 CNB 流水线自动跑完：交叉编译 → 打 NSIS 安装包 → 建 Release（绑定 `V<版本号>` 标签）→ 挂 `DownTube-Setup-<版本号>-<流水线编号>.exe` → 删掉历史 Release 回收存储额度。
+
+标签推上去之后本地删不掉（`cnb git delete-tag` 需要 `repo-release:rw`，本地令牌没有，流水线的可信令牌才有）。这一版流水线跑挂了想重来，就改版本号推一个新标签。
+
+Release 附件只放流水线自己构建出来的安装包，不当网盘用。

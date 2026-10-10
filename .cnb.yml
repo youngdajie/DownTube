@@ -1,0 +1,280 @@
+# DownTube 发版流水线
+#
+# 推一个「V + 版本号」的标签就全自动跑完：
+#   构建安装包 → 建 Release → 挂安装包 → 删掉历史 Release
+#
+#   git tag -a V0.2.0 -m "0.2.0" && git push cnb refs/tags/V0.2.0
+#
+# ------------------------------------------------------------------ 版本号
+# 唯一来源是 wails.json 的 info.productVersion，三处消费都由它推导：
+#   1. wails 把它写进 exe 的版本资源（资源管理器属性页看到的版本）
+#   2. frontend/vite.config.js 注入到界面上显示的版本
+#   3. 这里读它，决定 tag 名（V + 版本号）和安装包文件名
+# 发版只需要改一个数字，不会出现三处对不上。
+#
+# ------------------------------------------------- 为什么建 Release 要放流水线里
+# cnb CLI 走 OAuth2 设备授权流，客户端固定是 cnb_cli，签出来的令牌申请不到
+# repo-release:rw（拿设备流去申请会被回 invalid_scope），所以本地既建不了版本、
+# 也删不了旧版本。而 tag_push 属于「可信事件」，流水线里的 CNB_TOKEN 自带这个权限。
+#
+# -------------------------------------------------------------------- 标签
+# 标签推上去之后本地就删不掉了（cnb git delete-tag 同样要 repo-release:rw）。
+# 这一版流水线跑挂了想重来，就改版本号推一个新标签。
+#
+# -------------------------------------------------------------------- 存储
+# Release 附件占对象存储额度。安装包里含 yt-dlp（约 17 MB），一版就是十几 MB，
+# 不清的话每发一版就多占一份。所以每次发版只保留当前这一版。
+# 注意：这里只删 Release（会连带删掉它的附件），**不动 git 标签** ——
+# 标签是源码历史的一部分，安装包没了还能从标签的源码重新构建出来。
+
+V*:
+  tag_push:
+    - name: release
+      stages:
+        # ============================================================ 1. 版本号
+        - name: 读版本号
+          script: |
+            set -e
+            [ -n "$CNB_BUILD_WORKSPACE" ] && cd "$CNB_BUILD_WORKSPACE"
+
+            VERSION="$(jq -r '.info.productVersion // empty' wails.json)"
+            if [ -z "$VERSION" ]; then
+              echo "wails.json 里读不到 info.productVersion"
+              exit 1
+            fi
+
+            # 后面会拿它拼 tag 和文件名，格式必须是纯 x.y.z
+            case "$VERSION" in
+              [0-9]*.[0-9]*.[0-9]*) ;;
+              *) echo "版本号 $VERSION 不是 x.y.z 的形式"; exit 1 ;;
+            esac
+
+            TAG="V${VERSION}"
+
+            # 标签必须和版本号一致，否则会出现「包里是 0.2.0、Release 挂在 V0.3.0 上」
+            if [ "$CNB_BRANCH" != "$TAG" ]; then
+              echo "标签 $CNB_BRANCH 与 wails.json 里的版本 $VERSION 对不上（应为 $TAG）"
+              echo "改 wails.json 的 info.productVersion，或按当前版本号推 $TAG"
+              exit 1
+            fi
+
+            echo "版本 $VERSION · 标签 $TAG · 流水线编号 $CNB_BUILD_ID"
+            echo "##[set-output VERSION=$VERSION]"
+            echo "##[set-output TAG=$TAG]"
+          exports:
+            VERSION: VERSION
+            TAG: TAG
+
+        # ============================================================ 2. 构建
+        #
+        # 构建节点是 Linux，产物是 Windows exe + NSIS 安装包。三件事：
+        #   - Go 交叉编译 GOOS=windows：wails 原生支持（只有 darwin/linux 目标会跳过）
+        #   - NSIS 在 Linux 上可用（apt 装），makensis 本身就是跨平台编译器
+        #   - 图标与版本资源：wails 用 winres/winicon（纯 Go）生成 .syso，不需要 Windows 工具链
+        - name: 构建安装包
+          image: golang:1.27
+          script: |
+            set -e
+            [ -n "$CNB_BUILD_WORKSPACE" ] && cd "$CNB_BUILD_WORKSPACE"
+
+            # 走国内源：proxy.golang.org / registry.npmjs.org 在构建节点上大概率超时
+            export GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              nsis nodejs npm ca-certificates curl
+
+            # 系统源里的 Node 偶尔太老（vite 6 要求 >= 18），不够就换一个
+            if ! command -v node >/dev/null 2>&1 || \
+               [ "$(node -p 'Number(process.versions.node.split(".")[0])')" -lt 18 ]; then
+              echo "== 系统 Node 不可用或版本过低，改用 npmmirror 的 Node 22"
+              curl -fsSL https://registry.npmmirror.com/-/binary/node/v22.14.0/node-v22.14.0-linux-x64.tar.xz \
+                -o /tmp/node.tar.xz
+              mkdir -p /opt/node
+              tar -xJf /tmp/node.tar.xz -C /opt/node --strip-components=1
+              export PATH="/opt/node/bin:$PATH"
+            fi
+
+            npm config set registry https://registry.npmmirror.com
+
+            echo "=== 工具版本 ==="
+            go version
+            makensis -VERSION
+            node -v
+            npm -v
+
+            # 装 wails CLI。版本跟 go.mod 对齐，升 wails 时这里一起改
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
+            wails version
+
+            # tools/yt-dlp.exe 由 Git LFS 跟踪。指针文件只有一百来字节，
+            # 真身是十七 MB 的 PE —— 拿到的是指针的话，NSIS 会把这个文本文件
+            # 打进安装包，装出来 yt-dlp 直接不能用，而且不报错。
+            if [ "$(stat -c%s tools/yt-dlp.exe)" -lt 1048576 ]; then
+              echo "tools/yt-dlp.exe 只有 $(stat -c%s tools/yt-dlp.exe) 字节，"
+              echo "看着像 Git LFS 指针文件而不是真的 exe。检查 .gitattributes 与 LFS 对象是否完整。"
+              exit 1
+            fi
+
+            wails build -nsis -clean -platform windows/amd64
+
+            # ⚠️ 必须验一遍再往下走：makensis 不在 PATH 上时，wails build -nsis
+            #    **照样退出 0**，只是不打安装包（wails 源码 nsis_installer.go 里
+            #    是打一行 warning 然后 return nil）。只看退出码会得到一个
+            #    「流水线绿了但 Release 上什么都没有」的发版。
+            SETUP_SRC="build/bin/DownTube-Setup.exe"
+            if [ ! -f "$SETUP_SRC" ]; then
+              echo "安装包没生成：$SETUP_SRC"
+              ls -l build/bin/ || true
+              exit 1
+            fi
+
+            # 文件名 = 安装包-版本号-流水线编号：
+            # 同一版本号重跑不会互相覆盖，看文件名就知道是哪一次构建出来的
+            SETUP_DST="build/bin/DownTube-Setup-${VERSION}-${CNB_BUILD_ID}.exe"
+            mv "$SETUP_SRC" "$SETUP_DST"
+
+            echo "=== 产物 ==="
+            ls -lh build/bin/
+            echo "安装包：$SETUP_DST"
+
+        # ========================================================= 3. 建版本
+        - name: 建版本
+          script: |
+            set -e
+            [ -n "$CNB_BUILD_WORKSPACE" ] && cd "$CNB_BUILD_WORKSPACE"
+            [ -n "$TAG" ] || { echo "拿不到 TAG，不建版本"; exit 1; }
+
+            # 版本正文优先取 docs/releases/<版本号>.md，没有就退回标签的附注信息
+            BODY="${CNB_TAG_MESSAGE:-$TAG}"
+            for cand in "docs/releases/${VERSION}.md" "docs/releases/${TAG}.md"; do
+              if [ -f "$cand" ]; then
+                BODY="$(cat "$cand")"
+                echo "版本正文取自 $cand"
+                break
+              fi
+            done
+
+            # 字段名以 OpenAPI 的 PostReleaseForm 为准：
+            #   draft / prerelease 是布尔；make_latest 是**字符串** "true"/"false"。
+            #   写成布尔会被服务端回 400：cannot unmarshal bool into
+            #   PostReleaseForm.make_latest of type string。
+            PAYLOAD=$(jq -n \
+              --arg name "$TAG" \
+              --arg body "$BODY" \
+              --arg tag  "$TAG" \
+              --arg sha  "${CNB_BRANCH_SHA:-${CNB_COMMIT:-${CNB_DEFAULT_BRANCH:-main}}}" \
+              '{name:$name, body:$body, draft:false, prerelease:false,
+                make_latest:"true", tag_name:$tag, target_commitish:$sha}')
+
+            URL="${CNB_API_ENDPOINT}/${CNB_REPO_SLUG}/-/releases"
+            CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST "$URL" \
+              -H "Authorization: Bearer ${CNB_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.cnb.api+json" \
+              -d "$PAYLOAD")
+            echo "POST $URL -> HTTP $CODE"
+            cat /tmp/resp.json; echo
+
+            # 同一个 tag 重跑会撞「已存在」。这里不直接放行，而是**删掉重建**：
+            # 已存在的那份可能正文是旧的、附件也是上一次的，重建能保证这一页
+            # 对应的是刚构建出来的那个包。
+            #
+            # 注意服务端回的是 {"errcode":409,"errmsg":"conflict"}，
+            # 里面**没有**「已存在 / already exist」字样，只 grep 文案会漏判。
+            if [ "$CODE" = "409" ] || grep -qE '"errcode":[[:space:]]*409|已存在|already exist|conflict' /tmp/resp.json; then
+              echo "版本已存在，删掉重建"
+              RID=$(curl -sS "$URL?pageSize=100" \
+                    -H "Authorization: Bearer ${CNB_TOKEN}" \
+                    -H "Accept: application/vnd.cnb.api+json" \
+                    | jq -r --arg t "$TAG" '.[] | select(.tag_name==$t) | .id' | head -1)
+              if [ -n "$RID" ] && [ "$RID" != "null" ]; then
+                curl -sS -o /dev/null -X DELETE "$URL/$RID" \
+                  -H "Authorization: Bearer ${CNB_TOKEN}" \
+                  -H "Accept: application/vnd.cnb.api+json"
+                echo "  已删除旧的版本页 id=$RID"
+              fi
+              CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST "$URL" \
+                -H "Authorization: Bearer ${CNB_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/vnd.cnb.api+json" \
+                -d "$PAYLOAD")
+              echo "  重建 -> HTTP $CODE"
+            fi
+
+            case "$CODE" in
+              2*) echo "版本已就绪：$TAG"; exit 0 ;;
+            esac
+
+            echo "创建版本失败（HTTP $CODE）"
+            cat /tmp/resp.json
+            exit 1
+
+        # ========================================================= 4. 挂附件
+        #
+        # 用官方附件插件传，不自己调 OpenAPI：它处理了分片、重试、
+        # 以及「上传凭证过期就重新申请」这些事（凭证只有 10 秒有效期，
+        # 自己写很容易在十几 MB 的包上踩坑）。
+        - name: 上传安装包
+          image: cnbcool/attachments:latest
+          settings:
+            # tag_push 下不传也行（默认取 $CNB_BRANCH），这里显式传，
+            # 免得哪天换个触发方式就悄悄挂到了别的地方
+            tag: $TAG
+            attachments:
+              - "./build/bin/DownTube-Setup-*.exe"
+          exports:
+            FILES: FILES
+
+        # 插件成功但附件列表为空是可能的（glob 没匹配上，比如上面 mv 之后
+        # 文件名规则变了），不看一眼根本发现不了
+        - name: 确认附件
+          script: |
+            if [ -z "$FILES" ]; then
+              echo "附件列表是空的 —— 检查构建产物名与上面 glob 是否对得上"
+              ls -l build/bin/ || true
+              exit 1
+            fi
+            echo "已挂载附件：$FILES"
+
+        # ========================================================= 5. 清理
+        #
+        # 只留当前刚发的这一版，其余 Release 全删（连带的附件一起回收）。
+        #
+        # 清理失败不该让发版变红 —— 这只是省额度，包已经挂上去了。
+        # 所以脚本里任何一步出错都走 exit 0。
+        - name: 清理旧版本
+          script: |
+            [ -n "$CNB_BUILD_WORKSPACE" ] && cd "$CNB_BUILD_WORKSPACE"
+            if [ -z "$TAG" ]; then
+              echo "拿不到 TAG，为安全起见不删任何东西"
+              exit 0
+            fi
+
+            URL="${CNB_API_ENDPOINT}/${CNB_REPO_SLUG}/-/releases"
+            curl -sS "$URL?pageSize=100" \
+              -H "Authorization: Bearer ${CNB_TOKEN}" \
+              -H "Accept: application/vnd.cnb.api+json" \
+              -o /tmp/list.json || { echo "拉版本列表失败，跳过清理"; exit 0; }
+
+            # 这个接口返回的是**裸数组**，不是 {data:[...]}。
+            # cnb CLI 打印的 data: 那层信封是它自己加的，照它写 jq 会报
+            # "Cannot index array with string \"data\""。
+            #
+            # jq 只负责拆成「id + 标签名」两列，留哪删哪的判断放在 shell 里，
+            # 免得往 jq 里塞它版本不支持的函数。
+            jq -r '.[] | "\(.id)\t\(.tag_name)"' /tmp/list.json |
+            while IFS="$(printf '\t')" read -r RID RTAG; do
+              [ -z "$RID" ] && continue
+              if [ "$RTAG" = "$TAG" ]; then
+                echo "保留当前版本 $RTAG"
+                continue
+              fi
+              CODE=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$URL/$RID" \
+                -H "Authorization: Bearer ${CNB_TOKEN}" \
+                -H "Accept: application/vnd.cnb.api+json")
+              echo "删除旧版本 $RTAG -> HTTP $CODE"
+            done
+
+            exit 0

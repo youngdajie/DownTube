@@ -42,6 +42,11 @@ const icon = (name, size = 18) => {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.sparkle}</svg>`
 }
 
+// 构建时由 vite.config.js 从 wails.json 注入，界面上不要写死版本号。
+// 直接引用、不加 typeof 之类的运行时判断 —— 包一层运行时判断会让压缩器
+// 没法把它折叠成字面量，最后产出的还是个变量引用。
+const APP_VERSION = __APP_VERSION__
+
 const state = {
   page: 'downloads',
   tasks: [],
@@ -200,7 +205,7 @@ function render() {
       </aside>
       <main class="main">
         <section class="content ${state.enterAnim ? 'page-enter' : ''}">${state.page === 'downloads' ? renderDownloads() : state.page === 'settings' ? renderSettings() : renderAbout()}</section>
-        <footer class="statusbar"><div><span class="status-led"></span><span>本地数据已保存</span><i></i><span>${state.engineReady ? `yt-dlp 已就绪${state.ffmpegReady ? ' · FFmpeg 已就绪' : ' · FFmpeg 请自行安装'}` : '等待配置 yt-dlp'}</span></div><span class="version">DOWNTUBE <b>0.2.0</b> <span class="demo-tag">DEV</span></span></footer>
+        <footer class="statusbar"><div><span class="status-led"></span><span>本地数据已保存</span><i></i><span>${state.engineReady ? `yt-dlp 已就绪${state.ffmpegReady ? ' · FFmpeg 已就绪' : ' · FFmpeg 请自行安装'}` : '等待配置 yt-dlp'}</span></div><span class="version">DOWNTUBE <b>${APP_VERSION}</b> <span class="demo-tag">DEV</span></span></footer>
       </main>
     </div>
     ${state.modal ? renderModal() : ''}
@@ -259,12 +264,12 @@ function renderSettings() {
           <div class="cookie-source-body ${state.cookieSource === 'browser' ? '' : 'hidden'}" id="cookieSourceBrowser"><div class="cookie-browser"><span>读取 Cookies 的浏览器</span>${selectControl('cookieBrowser', ['Chrome', 'Microsoft Edge', 'Firefox', 'Brave'], state.cookieBrowser, '读取 Cookies 的浏览器')}</div><div class="cookie-hint ${state.browserRunning ? 'is-warning' : ''}" id="browserRunningHint">${state.browserRunning ? safe(state.cookieBrowser) + ' 正在运行 —— 读取 Cookies 会失败，请彻底退出后再试' : '此方式需完全退出浏览器（含后台进程）后使用'}</div></div>
           <div class="cookie-source-body ${state.cookieSource === 'file' ? '' : 'hidden'}" id="cookieSourceFile"><div class="folder-field"><div class="folder-path">${icon('file', 16)}<input id="cookieFilePath" value="${safe(state.cookieFile)}" placeholder="选择导出的 cookies.txt 文件" /></div><button class="subtle-btn" id="browseCookieFile">浏览...</button></div><div class="cookie-hint">用浏览器扩展（如 Get cookies.txt）导出 Netscape 格式的 cookies.txt 文件</div></div></div><div class="proxy-actions"><button class="subtle-btn" id="testProxy">${icon('shield', 15)}测试代理</button><span class="proxy-result ${state.proxyChecked && !state.proxyReady ? 'proxy-failed' : ''}">${state.proxyChecked ? safe(state.proxyMessage) : state.useProxy ? '点击测试连接' : '代理已关闭'}</span></div>
       </section>
-    </div><aside class="settings-side"><div class="side-note"><div class="note-mark">${icon('shield', 19)}</div><h3>你的下载，保持私密</h3><p>所有任务和设置都保存在本地设备上。我们不会上传或收集你的视频链接。</p><div class="note-divider"></div><div class="note-foot">${icon('checkcircle', 15)} 本地处理 · 无云端同步</div></div><div class="side-version"><span>应用版本</span><b>DownTube <i>0.2.0 Dev</i></b><button id="aboutBtn">关于 DownTube ${icon('chevron', 13)}</button></div></aside></div>`
+    </div><aside class="settings-side"><div class="side-note"><div class="note-mark">${icon('shield', 19)}</div><h3>你的下载，保持私密</h3><p>所有任务和设置都保存在本地设备上。我们不会上传或收集你的视频链接。</p><div class="note-divider"></div><div class="note-foot">${icon('checkcircle', 15)} 本地处理 · 无云端同步</div></div><div class="side-version"><span>应用版本</span><b>DownTube <i>${APP_VERSION} Dev</i></b><button id="aboutBtn">关于 DownTube ${icon('chevron', 13)}</button></div></aside></div>`
 }
 
 function renderAbout() {
   return `<div class="page-heading"><div><div class="eyebrow">ABOUT <span class="eyebrow-line"></span></div><h1>关于 DownTube</h1><p>一个专注于本地任务管理的 Windows 桌面工具。</p></div></div>
-    <section class="about-hero panel"><div class="about-identity"><img class="about-app-icon" src="/downtube-icon.svg" alt="DownTube 图标"><div class="about-heading"><div class="about-kicker">DESKTOP MEDIA TOOL</div><div class="about-name">DownTube</div><p>YouTube 下载任务管理工具</p></div></div><div class="about-hero-meta"><span class="about-version"><i></i> 开发版 0.2.0</span><div class="about-author"><span>DESIGNED BY</span><b>小杰</b></div></div><svg class="about-orbit" viewBox="0 0 220 180" aria-hidden="true"><circle cx="132" cy="88" r="70"/><circle cx="132" cy="88" r="48"/><path d="M132 18v140M62 88h140M82 38l100 100m0-100L82 138"/><circle cx="132" cy="88" r="8"/></svg></section>
+    <section class="about-hero panel"><div class="about-identity"><img class="about-app-icon" src="/downtube-icon.svg" alt="DownTube 图标"><div class="about-heading"><div class="about-kicker">DESKTOP MEDIA TOOL</div><div class="about-name">DownTube</div><p>YouTube 下载任务管理工具</p></div></div><div class="about-hero-meta"><span class="about-version"><i></i> 开发版 ${APP_VERSION}</span><div class="about-author"><span>DESIGNED BY</span><b>小杰</b></div></div><svg class="about-orbit" viewBox="0 0 220 180" aria-hidden="true"><circle cx="132" cy="88" r="70"/><circle cx="132" cy="88" r="48"/><path d="M132 18v140M62 88h140M82 38l100 100m0-100L82 138"/><circle cx="132" cy="88" r="8"/></svg></section>
     <div class="about-links"><button class="about-link" id="linkHomepage">${icon('globe', 16)}<span>www.yangjie.site</span></button><button class="about-link" id="linkBilibili">${icon('bilibili', 16)}<span>哔哩哔哩</span></button><button class="about-link" id="linkGithub">${icon('github', 16)}<span>GitHub 仓库</span></button></div>
     <section class="about-section"><div class="about-section-heading"><div><div class="about-overline">THE STACK</div><h2>技术组成</h2><p>各组件分工明确，协同完成桌面下载流程。</p></div><span class="about-section-index">01 <i>/</i> 03</span></div><div class="tech-grid">
       <article class="tech-card"><div class="tech-card-top"><span class="tech-icon go">${icon('code', 22)}</span><span class="tech-index">01</span></div><div class="tech-card-copy"><h3>Go</h3><p>管理下载任务、本地设置、进程控制与 Windows 系统集成。</p></div><div class="tech-card-foot"><span>APPLICATION CORE</span><span>GO</span></div></article>
@@ -283,7 +288,7 @@ function renderAbout() {
     </svg></div>
     <div class="flow-notes"><div class="flow-note"><b>为什么要 FFmpeg</b><span>现代 YouTube 采用 DASH：视频与音频是两条独立传输的流，合并成可播放文件需要 FFmpeg 完成封装。</span></div><div class="flow-note"><b>全程本地处理</b><span>解析、下载与合成都在你的电脑上完成，链接与文件不经过任何中间服务器。</span></div><div class="flow-note"><b>MP3 模式</b><span>该模式只取音频流并由 FFmpeg 转码为 MP3，完全不下载视频数据。</span></div></div></section>
     <section class="disclaimer-card"><div class="disclaimer-layout"><div class="disclaimer-heading"><div class="disclaimer-icon">${icon('scale', 20)}</div><div><div class="about-overline">PLEASE READ</div><h2>使用说明与免责声明</h2><p>请在使用前阅读并遵守相关规则。</p></div></div><div class="disclaimer-copy"><p>本程序仅提供本地下载任务管理和媒体处理功能。请仅下载你有权保存或使用的内容，并遵守 YouTube 及相关网站的服务条款、版权规则和所在地法律。</p><p>不得将本程序用于侵犯他人权益、未经授权传播内容或规避访问限制。用户应自行确认下载行为的合法性，并对使用本程序产生的行为和后果负责。</p><p>本程序按现状提供。开发者不保证第三方网站、下载引擎或媒体资源持续可用，也不对第三方内容及下载结果承担责任。</p></div></div><div class="disclaimer-rule"><span>LOCAL FIRST</span><i></i><span>USER RESPONSIBILITY</span><i></i><span>AS IS</span></div></section>
-    <div class="about-footnote"><span>${icon('shield', 14)}</span><p>任务列表与设置仅保存在本机。DownTube 不提供视频内容，也不托管下载文件。</p><span class="footnote-version">DOWNTUBE · 0.2.0</span></div>`
+    <div class="about-footnote"><span>${icon('shield', 14)}</span><p>任务列表与设置仅保存在本机。DownTube 不提供视频内容，也不托管下载文件。</p><span class="footnote-version">DOWNTUBE · ${APP_VERSION}</span></div>`
 }
 
 function renderModal() {
