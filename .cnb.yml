@@ -67,10 +67,19 @@ V*:
 
         # ============================================================ 2. 构建
         #
-        # 构建节点是 Linux，产物是 Windows exe + NSIS 安装包。三件事：
+        # 构建节点是 Linux，产物是 Windows exe + NSIS 安装包。四件事：
         #   - Go 交叉编译 GOOS=windows：wails 原生支持（只有 darwin/linux 目标会跳过）
         #   - NSIS 在 Linux 上可用（apt 装），makensis 本身就是跨平台编译器
         #   - 图标与版本资源：wails 用 winres/winicon（纯 Go）生成 .syso，不需要 Windows 工具链
+        #   - ⚠️ 交叉编译有个**反直觉的坑**：wails 生成前端绑定时，会按**宿主机**
+        #     平台（GOOS=linux）再编译一遍 main.go，而不是按 -platform 的目标平台。
+        #     所以 main.go 里不能直接出现 Windows 专有符号（syscall.NewLazyDLL、
+        #     SysProcAttr.HideWindow 等），否则卡在「Generating bindings」：
+        #       ./main.go:1094:29: undefined: syscall.NewLazyDLL
+        #       ./main.go:277:41: unknown field HideWindow ...
+        #     这也是 platform_windows.go / platform_other.go 存在的原因：
+        #     平台专有代码全部拆到带构建标签的文件里，main.go 保持平台中立。
+        #     代价：给 Windows 加新 API 时记得放进 platform_windows.go。
         - name: 构建安装包
           image: golang:1.27
           script: |

@@ -59,8 +59,14 @@ wails build -nsis -clean -platform windows/amd64
 3. 提交并推送到 GitHub 与 CNB
 4. 推标签：`git tag -a V0.2.0 -m "0.2.0" && git push cnb refs/tags/V0.2.0`
 
+标签格式必须是 `V` + `wails.json` 里的版本号，对不上流水线会直接红掉 ——
+这样就不会出现「安装包是 0.2.0、Release 却挂在 V0.3.0 上」的情况。
+
 之后 CNB 流水线自动跑完：交叉编译 → 打 NSIS 安装包 → 建 Release（绑定 `V<版本号>` 标签）→ 挂 `DownTube-Setup-<版本号>-<流水线编号>.exe` → 删掉历史 Release 回收存储额度。
 
-标签推上去之后本地删不掉（`cnb git delete-tag` 需要 `repo-release:rw`，本地令牌没有，流水线的可信令牌才有）。这一版流水线跑挂了想重来，就改版本号推一个新标签。
+标签推上去之后本地删不掉（`cnb git delete-tag` 需要 `repo-release:rw`，本地令牌没有，流水线的可信令牌才有）。这一版流水线跑挂了想重来，两条路：
+
+- 只是流水线/CI 的问题、应用代码没动：把标签挪到新提交再强推（`git tag -f V0.2.0 <sha>` + `git push -f`）
+- 应用代码也改了：那就按新版本号推一个新标签
 
 Release 附件只放流水线自己构建出来的安装包，不当网盘用。
