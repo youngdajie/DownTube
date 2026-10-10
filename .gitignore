@@ -1,0 +1,25 @@
+# Go build output
+/DownTube-dev.exe
+/DownTube.exe
+/build/bin/
+
+# Wails-generated build helpers (project.nsi is maintained source)
+/build/windows/installer/wails_tools.nsh
+/build/windows/installer/tmp/
+
+# Frontend dependencies and generated bundles
+/frontend/node_modules/
+/frontend/dist/
+/frontend/package.json.md5
+
+# Local downloads and packaged distributions
+/downloads/
+/portable/
+/发布包/
+/DownTube-*.zip
+/tools/*.exe
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.log

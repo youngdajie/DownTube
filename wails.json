@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "DownTube",
+  "outputfilename": "DownTube.exe",
+  "frontend:dir": "frontend",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "version": "2",
+  "info": {
+    "companyName": "小杰",
+    "productName": "DownTube",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2026 小杰",
+    "comments": "YouTube 下载任务管理工具"
+  }
+}
