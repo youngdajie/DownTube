@@ -12,6 +12,8 @@ VIAddVersionKey "ProductName" "${INFO_PRODUCTNAME}"
 ManifestDPIAware true
 !include "MUI.nsh"
 !define MUI_ABORTWARNING
+!define MUI_ICON "..\icon.ico"
+!define MUI_UNICON "..\icon.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\DownTube.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "启动 DownTube"
 !insertmacro MUI_PAGE_WELCOME
