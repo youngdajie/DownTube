@@ -6,6 +6,10 @@ export function AddLinks(arg1) {
   return window['go']['main']['App']['AddLinks'](arg1);
 }
 
+export function CheckBrowserRunning(arg1) {
+  return window['go']['main']['App']['CheckBrowserRunning'](arg1);
+}
+
 export function ClearTasks() {
   return window['go']['main']['App']['ClearTasks']();
 }
@@ -22,6 +26,14 @@ export function GetTasks() {
   return window['go']['main']['App']['GetTasks']();
 }
 
+export function InstallFFmpeg() {
+  return window['go']['main']['App']['InstallFFmpeg']();
+}
+
+export function OpenBilibili() {
+  return window['go']['main']['App']['OpenBilibili']();
+}
+
 export function OpenDownloadFolder() {
   return window['go']['main']['App']['OpenDownloadFolder']();
 }
@@ -32,6 +44,14 @@ export function OpenEngineDownloads() {
 
 export function OpenFFmpegDownloads() {
   return window['go']['main']['App']['OpenFFmpegDownloads']();
+}
+
+export function OpenHomepage() {
+  return window['go']['main']['App']['OpenHomepage']();
+}
+
+export function OpenProjectRepo() {
+  return window['go']['main']['App']['OpenProjectRepo']();
 }
 
 export function PauseAllTasks() {
@@ -52,6 +72,14 @@ export function ReportFrontendError(arg1) {
 
 export function SaveSettings(arg1) {
   return window['go']['main']['App']['SaveSettings'](arg1);
+}
+
+export function SelectCookieFile() {
+  return window['go']['main']['App']['SelectCookieFile']();
+}
+
+export function SelectFFmpegFile() {
+  return window['go']['main']['App']['SelectFFmpegFile']();
 }
 
 export function SelectFolder() {

@@ -8,7 +8,10 @@ export namespace main {
 	    proxyURL: string;
 	    autoDetectProxy: boolean;
 	    useBrowserCookie: boolean;
+	    cookieSource: string;
 	    cookieBrowser: string;
+	    cookieFile: string;
+	    ffmpegPath: string;
 	    highFrameRate: boolean;
 	    openOnComplete: boolean;
 	
@@ -25,7 +28,10 @@ export namespace main {
 	        this.proxyURL = source["proxyURL"];
 	        this.autoDetectProxy = source["autoDetectProxy"];
 	        this.useBrowserCookie = source["useBrowserCookie"];
+	        this.cookieSource = source["cookieSource"];
 	        this.cookieBrowser = source["cookieBrowser"];
+	        this.cookieFile = source["cookieFile"];
+	        this.ffmpegPath = source["ffmpegPath"];
 	        this.highFrameRate = source["highFrameRate"];
 	        this.openOnComplete = source["openOnComplete"];
 	    }

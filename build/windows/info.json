@@ -3,7 +3,17 @@
 		"file_version": "{{.Info.ProductVersion}}"
 	},
 	"info": {
-		"0000": {
+		"0409": {
+			"FileVersion": "{{.Info.ProductVersion}}",
+			"ProductVersion": "{{.Info.ProductVersion}}",
+			"CompanyName": "{{.Info.CompanyName}}",
+			"FileDescription": "{{.Info.ProductName}}",
+			"LegalCopyright": "{{.Info.Copyright}}",
+			"ProductName": "{{.Info.ProductName}}",
+			"Comments": "{{.Info.Comments}}"
+		},
+		"0804": {
+			"FileVersion": "{{.Info.ProductVersion}}",
 			"ProductVersion": "{{.Info.ProductVersion}}",
 			"CompanyName": "{{.Info.CompanyName}}",
 			"FileDescription": "{{.Info.ProductName}}",

@@ -19,6 +19,9 @@
 /DownTube-*.zip
 /tools/*.exe
 
+# WorkBuddy workspace memory
+.workbuddy/
+
 # Editor and OS files
 .DS_Store
 Thumbs.db

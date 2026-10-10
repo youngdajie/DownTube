@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AddLinks(arg1:string):Promise<main.Snapshot>;
 
+export function CheckBrowserRunning(arg1:string):Promise<boolean>;
+
 export function ClearTasks():Promise<main.Snapshot>;
 
 export function GetSettings():Promise<main.Settings>;
@@ -12,11 +14,19 @@ export function GetSystemStatus():Promise<Record<string, any>>;
 
 export function GetTasks():Promise<Array<main.Task>>;
 
+export function InstallFFmpeg():Promise<Record<string, any>>;
+
+export function OpenBilibili():Promise<void>;
+
 export function OpenDownloadFolder():Promise<void>;
 
 export function OpenEngineDownloads():Promise<void>;
 
 export function OpenFFmpegDownloads():Promise<void>;
+
+export function OpenHomepage():Promise<void>;
+
+export function OpenProjectRepo():Promise<void>;
 
 export function PauseAllTasks():Promise<main.Snapshot>;
 
@@ -27,6 +37,10 @@ export function RemoveTask(arg1:number):Promise<main.Snapshot>;
 export function ReportFrontendError(arg1:string):Promise<void>;
 
 export function SaveSettings(arg1:main.Settings):Promise<main.Snapshot>;
+
+export function SelectCookieFile():Promise<string>;
+
+export function SelectFFmpegFile():Promise<Record<string, any>>;
 
 export function SelectFolder():Promise<string>;
 
