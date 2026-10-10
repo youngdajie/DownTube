@@ -19,9 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/logger"
@@ -274,7 +272,7 @@ func ffmpegVersion(path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, "-version")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideConsoleWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -364,7 +362,7 @@ func (a *App) fetchTitle(url string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, engine, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideConsoleWindow(cmd)
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	out, err := cmd.Output()
 	if err != nil {
@@ -594,7 +592,7 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	}
 	cmd := exec.CommandContext(ctx, engine, args...)
 	// 隐藏控制台窗口，并禁用 Python 输出缓冲，保证进度行实时到达。
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	hideConsoleWindow(cmd)
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1016,7 +1014,7 @@ func (a *App) CheckBrowserRunning(browser string) bool {
 	for _, name := range names {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		cmd := exec.CommandContext(ctx, "tasklist", "/FI", "IMAGENAME eq "+name, "/NH")
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		hideConsoleWindow(cmd)
 		out, err := cmd.Output()
 		cancel()
 		if err == nil && strings.Contains(string(out), name) {
@@ -1090,44 +1088,13 @@ func (a *App) saveLocked() (err error) {
 	return os.Rename(tmp, a.storePath)
 }
 
-var (
-	kernel32DLL      = syscall.NewLazyDLL("kernel32.dll")
-	procCreateMutexW = kernel32DLL.NewProc("CreateMutexW")
-	user32DLL        = syscall.NewLazyDLL("user32.dll")
-	procMessageBoxW  = user32DLL.NewProc("MessageBoxW")
-)
-
-// acquireSingleInstance 通过命名互斥量保证同一时间只运行一个 DownTube 实例，
-// 避免多实例读写同一份 state.json 导致任务与设置互相覆盖。
-func acquireSingleInstance() (syscall.Handle, bool) {
-	name, err := syscall.UTF16PtrFromString("Local\\DownTube-SingleInstance")
-	if err != nil {
-		return 0, true
-	}
-	handle, _, lastErr := procCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(name)))
-	if handle == 0 {
-		return 0, true
-	}
-	if errno, ok := lastErr.(syscall.Errno); ok && errno == syscall.ERROR_ALREADY_EXISTS {
-		syscall.CloseHandle(syscall.Handle(handle))
-		return 0, false
-	}
-	return syscall.Handle(handle), true
-}
-
-func showAlreadyRunningDialog() {
-	text, _ := syscall.UTF16PtrFromString("DownTube 已经在运行了。\n请切换到任务栏中已打开的窗口。")
-	title, _ := syscall.UTF16PtrFromString("DownTube")
-	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x40)
-}
-
 func main() {
-	if mutexHandle, fresh := acquireSingleInstance(); !fresh {
+	releaseInstance, fresh := acquireSingleInstance()
+	if !fresh {
 		showAlreadyRunningDialog()
 		return
-	} else {
-		defer syscall.CloseHandle(mutexHandle)
 	}
+	defer releaseInstance()
 	logFile, err := os.OpenFile(filepath.Join(os.TempDir(), "downtube-dev.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		panic(err)
