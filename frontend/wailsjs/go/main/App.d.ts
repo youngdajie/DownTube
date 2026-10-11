@@ -14,13 +14,21 @@ export function GetSystemStatus():Promise<Record<string, any>>;
 
 export function GetTasks():Promise<Array<main.Task>>;
 
+export function ImportFFmpegArchive():Promise<Record<string, any>>;
+
 export function InstallFFmpeg():Promise<Record<string, any>>;
 
 export function OpenBilibili():Promise<void>;
 
+export function OpenCNBRepo():Promise<void>;
+
+export function OpenDataFolder():Promise<void>;
+
 export function OpenDownloadFolder():Promise<void>;
 
 export function OpenEngineDownloads():Promise<void>;
+
+export function OpenExternalURL(arg1:string):Promise<boolean>;
 
 export function OpenFFmpegDownloads():Promise<void>;
 

@@ -1,149 +1,29 @@
 /* ============================================================
-   DownTube 交互动效增强（2026-10-11 添加）
+   DownTube 交互动效(极简版)
    ------------------------------------------------------------
-   策略说明：本应用采用全量重绘（每次状态更新会重建 DOM），
-   常驻循环动画会被反复重播导致闪烁，因此这里只保留三类
-   可靠的动效：
-     1) 交互反馈：hover / focus / active / 开关（transition 实现）
-     2) 页面切换入场：由 JS 在切页时一次性触发（.page-enter）
-     3) 局部切换：Cookies 来源 tab 等（class 切换 + transition）
+   应用采用全量重绘 + 局部补丁的渲染方式,常驻动画容易闪烁,
+   因此这里只保留:
+     1) 页面切换入场:.page-enter 由 JS 在切页时一次性触发
+     2) 无障碍:prefers-reduced-motion 下关闭动效
+   其余交互反馈(按钮按压、开关、输入聚焦)都在 style.css 里用
+   transition 完成。
    ============================================================ */
 
-/* ---------- 开关旋钮：按压拉伸 + 平滑切换 + 开启光晕 ---------- */
-.switch span {
-  width: 48px; height: 28px; box-sizing: border-box; border-radius: 999px;
-  border: 1px solid #4c5a62;
-  background: linear-gradient(180deg, #232b30, #1e2529);
-  box-shadow: inset 0 2px 4px #0008;
-  transition: background .3s cubic-bezier(.4,0,.2,1), border-color .3s cubic-bezier(.4,0,.2,1), box-shadow .3s cubic-bezier(.4,0,.2,1);
+.content.page-enter > * {
+  animation: pageIn .32s cubic-bezier(.22, .9, .3, 1) backwards;
 }
-.switch span:after {
-  content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 999px;
-  background: linear-gradient(180deg, #f2f6f8, #c9d4da);
-  box-shadow: 0 2px 5px #00000073, 0 0 0 1px #ffffff14;
-  transition: transform .3s cubic-bezier(.34,1.4,.64,1), width .22s cubic-bezier(.4,0,.2,1), background .3s, box-shadow .3s;
+.content.page-enter > *:nth-child(2) { animation-delay: .04s; }
+.content.page-enter > *:nth-child(3) { animation-delay: .08s; }
+.content.page-enter > *:nth-child(n+4) { animation-delay: .12s; }
+@keyframes pageIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
 }
-.switch:hover span { border-color: #5d6c75; }
-.switch:hover span:after { background: linear-gradient(180deg, #ffffff, #d5dfe5); }
-.switch input:checked + span {
-  border-width: 1px;
-  border-color: #2aa5e0;
-  background: linear-gradient(135deg, #149cdf, #0873ad);
-  box-shadow: inset 0 1px 2px #00000040, 0 0 14px #1296db4d, 0 0 0 1px #1296db40;
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
-.switch input:checked + span:after {
-  top: 3px; left: 3px; width: 20px; height: 20px;
-  transform: translateX(20px);
-  background: linear-gradient(180deg, #ffffff, #dff2fc);
-  box-shadow: 0 2px 5px #00000059, 0 0 0 1px #ffffff1a;
-}
-.switch:active span:after { width: 24px; }
-.switch input:checked:active + span:after { transform: translateX(16px); width: 24px; }
-.switch input:focus-visible + span { outline: none; box-shadow: 0 0 0 3px #1296db30; }
-
-/* ---------- 输入框 / 可编辑区域：聚焦光圈 ---------- */
-.text-input, .folder-path, .searchbox, .modal-field textarea { transition: border-color .22s cubic-bezier(.4,0,.2,1), box-shadow .22s cubic-bezier(.4,0,.2,1), background .22s; }
-.text-input:hover, .folder-path:hover, .searchbox:hover { border-color: #5d6c75; }
-.text-input:focus { border-color: #1296db !important; box-shadow: 0 0 0 3px #1296db2b, 0 0 20px #1296db1f !important; }
-.folder-path:focus-within { border-color: #1296db !important; box-shadow: 0 0 0 3px #1296db2b, 0 0 20px #1296db1f !important; }
-.searchbox:focus-within { border-width: 1px !important; border-color: #1296db !important; box-shadow: 0 0 0 3px #1296db2b, 0 0 20px #1296db1f !important; }
-.modal-field textarea:focus { border-width: 1px !important; border-color: #1296db !important; box-shadow: 0 0 0 3px #1296db2b, 0 0 20px #1296db1f !important; }
-.select-trigger:focus-visible { outline: none; border-color: #48afe0; box-shadow: 0 0 0 3px #1296db26; }
-
-/* ---------- 按钮 / 图标按压反馈 ---------- */
-.primary-btn, .tonal-btn, .subtle-btn, .text-btn { transition: transform .16s cubic-bezier(.4,0,.2,1), background .18s, border-color .18s, color .18s, box-shadow .18s; }
-.primary-btn:active, .tonal-btn:active, .subtle-btn:active { transform: scale(.96); }
-.row-btn, .icon-btn, .window-control { transition: background .15s, color .15s, transform .15s; }
-.row-btn:active, .icon-btn:active { transform: scale(.88); }
-
-/* ---------- 卡片 / 任务行 / 侧边导航 ---------- */
-.stat-card, .tech-card { transition: transform .24s cubic-bezier(.2,.8,.3,1), border-color .24s, box-shadow .24s, background .24s; }
-.stat-card:hover, .tech-card:hover { transform: translateY(-2px); border-color: #3f4a52; box-shadow: 0 12px 30px #00000047; }
-tbody tr { transition: background .16s; }
-tbody tr:hover { background: #ffffff06; }
-.nav-item { transition: background .18s, color .18s, box-shadow .18s; }
-.nav-item svg { transition: color .18s; }
-
-/* ---------- 页面切换入场（由 JS 一次性触发） ---------- */
-.content.page-enter > * { animation: pageIn .38s cubic-bezier(.22,.9,.3,1) backwards; }
-.content.page-enter > *:nth-child(2) { animation-delay: .05s; }
-.content.page-enter > *:nth-child(3) { animation-delay: .1s; }
-.content.page-enter > *:nth-child(4) { animation-delay: .14s; }
-.content.page-enter > *:nth-child(n+5) { animation-delay: .18s; }
-@keyframes pageIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-
-/* ---------- Cookies 面板（来源切换 + 提示） ---------- */
-.cookie-panel { margin-top: 8px; padding: 13px 14px; border: 1px solid #2c343a; border-radius: 12px; background: #151b1f80; }
-.cookie-source-tabs { display: flex; gap: 5px; padding: 3px; border-radius: 10px; background: #11171b; border: 1px solid #252d33; margin-bottom: 12px; }
-.cookie-source-tab {
-  flex: 1; height: 33px; border: 0; border-radius: 8px; background: transparent; color: #93a0a8;
-  font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer;
-  transition: background .22s cubic-bezier(.4,0,.2,1), color .22s, box-shadow .22s;
-}
-.cookie-source-tab:hover { color: #d3dde2; }
-.cookie-source-tab.active { background: linear-gradient(135deg, #1296db30, #1296db18); color: #c2e8fb; box-shadow: inset 0 0 0 1px #1296db4d, 0 2px 10px #1296db1f; }
-.cookie-source-tab svg { flex: none; }
-.cookie-source-tab.active svg { color: #5cc2f0; }
-.cookie-source-body.hidden { display: none; }
-.cookie-browser { display: grid; gap: 8px; }
-.cookie-hint {
-  margin-top: 9px; padding: 9px 11px; border-radius: 9px;
-  border: 1px solid #2b3941; background: #15212a66; color: #8ea3ac;
-  font-size: 10.5px; line-height: 1.65;
-  transition: border-color .25s, background .25s, color .25s;
-}
-.cookie-hint.is-warning { border-color: #6b4a33; background: #2a1f1766; color: #f0c08a; }
-
-/* ---------- 关于页 · 下载原理图 ---------- */
-.flow-card { padding: 26px 28px; border-radius: var(--md-radius-lg); }
-.flow-svg { width: 100%; height: auto; display: block; }
-.flow-svg text { font-family: inherit; }
-.flow-node .flow-box { transition: stroke .2s, fill .2s; }
-.flow-node:hover .flow-box { stroke: #4d5d68; }
-.flow-notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.flow-note { padding: 14px 16px; border: 1px solid #2c343a; border-radius: 13px; background: #151b1f80; }
-.flow-note b { display: block; font-size: 11.5px; color: #bad9e9; margin-bottom: 7px; font-weight: 600; }
-.flow-note span { display: block; font-size: 10.5px; line-height: 1.7; color: #92a3ac; }
-@media (max-width: 1050px) { .flow-notes { grid-template-columns: 1fr; } }
-
-/* ---------- FFmpeg 安装弹窗 ---------- */
-.ffmpeg-modal { width: min(560px, calc(100vw - 40px)); }
-.ffmpeg-intro { font-size: 11px; color: #a3b0b8; line-height: 1.7; margin-bottom: 14px; }
-.ffmpeg-options { display: grid; gap: 9px; }
-.ffmpeg-option {
-  display: flex; align-items: center; gap: 12px; padding: 13px 14px;
-  border: 1px solid #333c44; border-radius: 13px; background: #171d22;
-  cursor: pointer; text-align: left; width: 100%;
-  transition: border-color .2s, background .2s, transform .15s;
-}
-.ffmpeg-option:hover:not(:disabled) { border-color: #2f6f92; background: #18242c; }
-.ffmpeg-option:active:not(:disabled) { transform: scale(.985); }
-.ffmpeg-option:disabled { opacity: .5; cursor: default; }
-.ffmpeg-option-icon { width: 38px; height: 38px; flex: none; border-radius: 13px; display: grid; place-items: center; background: #20333f; color: #6fc6ee; }
-.ffmpeg-option-copy { min-width: 0; }
-.ffmpeg-option-copy b { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #dfe5e9; font-weight: 550; }
-.ffmpeg-option-copy b em { font-style: normal; font-size: 9.5px; color: #7fd0f5; border: 1px solid #2b5d78; border-radius: 999px; padding: 1px 7px; }
-.ffmpeg-option-copy small { display: block; margin-top: 4px; font-size: 10.5px; color: #8fa0a9; }
-.ffmpeg-progress { margin-top: 14px; padding: 12px 14px; border: 1px solid #2c3a42; border-radius: 12px; background: #141a1f; }
-.ffmpeg-progress-head { display: flex; justify-content: space-between; gap: 12px; font-size: 10.5px; color: #93a4ad; margin-bottom: 9px; }
-.ffmpeg-progress-head b { color: #7fd0f5; font-weight: 600; flex: none; }
-.ffmpeg-progress-track { height: 7px; border-radius: 999px; background: #232b31; overflow: hidden; }
-.ffmpeg-progress-track span { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #1296db, #4fc0f2); transition: width .25s ease; }
-
-/* ---------- 桌面应用质感：禁用网页行为 ---------- */
-body { user-select: none; cursor: default; }
-input, textarea { user-select: text; cursor: text; }
-button, [role="button"], label, a { cursor: default; }
-img, svg, a { -webkit-user-drag: none; }
-
-/* ---------- 关于页 · 作者链接 ---------- */
-.about-links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; padding: 0 2px; }
-.about-link {
-  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px;
-  border: 1px solid #33404a; border-radius: 999px; background: #171d23; color: #b9c9d2;
-  font-size: 11.5px; cursor: default;
-  transition: border-color .2s, background .2s, color .2s, transform .15s, box-shadow .2s;
-}
-.about-link:hover { border-color: #2f7fa8; background: #182630; color: #d9ecf7; box-shadow: 0 0 14px #1296db1f; }
-.about-link:active { transform: scale(.96); }
-.about-link svg { color: #6fc6ee; flex: none; }

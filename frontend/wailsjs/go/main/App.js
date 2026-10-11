@@ -26,6 +26,10 @@ export function GetTasks() {
   return window['go']['main']['App']['GetTasks']();
 }
 
+export function ImportFFmpegArchive() {
+  return window['go']['main']['App']['ImportFFmpegArchive']();
+}
+
 export function InstallFFmpeg() {
   return window['go']['main']['App']['InstallFFmpeg']();
 }
@@ -34,12 +38,24 @@ export function OpenBilibili() {
   return window['go']['main']['App']['OpenBilibili']();
 }
 
+export function OpenCNBRepo() {
+  return window['go']['main']['App']['OpenCNBRepo']();
+}
+
+export function OpenDataFolder() {
+  return window['go']['main']['App']['OpenDataFolder']();
+}
+
 export function OpenDownloadFolder() {
   return window['go']['main']['App']['OpenDownloadFolder']();
 }
 
 export function OpenEngineDownloads() {
   return window['go']['main']['App']['OpenEngineDownloads']();
+}
+
+export function OpenExternalURL(arg1) {
+  return window['go']['main']['App']['OpenExternalURL'](arg1);
 }
 
 export function OpenFFmpegDownloads() {

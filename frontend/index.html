@@ -3,9 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#101216" />
     <title>DownTube</title>
     <link rel="icon" type="image/svg+xml" href="/downtube-icon.svg" />
+    <script>
+      // 样式加载前先定主题,避免首帧闪烁。存储不可用时保持默认深色。
+      try {
+        var saved = localStorage.getItem('downtube-theme')
+        var theme = saved === 'light' || saved === 'dark' ? saved : (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        document.documentElement.dataset.theme = theme
+      } catch (error) {
+        document.documentElement.dataset.theme = 'dark'
+      }
+    </script>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>

@@ -16,11 +16,13 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/bodgit/sevenzip"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/logger"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -165,6 +167,16 @@ func (a *App) OpenFFmpegDownloads() {
 	runtime.BrowserOpenURL(a.ctx, "https://ffmpeg.org/download.html")
 }
 
+// OpenExternalURL 打开外部链接(仅供界面上的下载镜像等使用,仅放行 http/https)。
+func (a *App) OpenExternalURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return false
+	}
+	runtime.BrowserOpenURL(a.ctx, u.String())
+	return true
+}
+
 func (a *App) OpenHomepage() {
 	runtime.BrowserOpenURL(a.ctx, "https://www.yangjie.site")
 }
@@ -175,6 +187,10 @@ func (a *App) OpenBilibili() {
 
 func (a *App) OpenProjectRepo() {
 	runtime.BrowserOpenURL(a.ctx, "https://github.com/youngdajie/DownTube")
+}
+
+func (a *App) OpenCNBRepo() {
+	runtime.BrowserOpenURL(a.ctx, "https://cnb.cool/youngdajie/downtube")
 }
 
 func (a *App) shutdown(context.Context) {
@@ -223,6 +239,7 @@ func (a *App) GetSystemStatus() map[string]any {
 	}
 	a.mu.Lock()
 	proxyEnabled, proxyURL, autoDetect := a.store.Settings.UseProxy, a.store.Settings.ProxyURL, a.store.Settings.AutoDetectProxy
+	dataDir := filepath.Dir(a.storePath)
 	a.mu.Unlock()
 	proxyOK, proxyMessage := false, "代理检测已关闭"
 	if proxyEnabled && autoDetect {
@@ -234,10 +251,11 @@ func (a *App) GetSystemStatus() map[string]any {
 		"engineReady": err == nil, "enginePath": engine, "engineError": errorText(err),
 		"ffmpegReady": ffmpegErr == nil, "ffmpegPath": ffmpeg, "ffmpegError": errorText(ffmpegErr), "ffmpegVersion": ffmpegLabel,
 		"proxyChecked": proxyEnabled && autoDetect, "proxyReady": proxyOK, "proxyMessage": proxyMessage,
+		"dataDir": dataDir,
 	}
 }
 
-// ffmpegInstallDir 返回应用内自动安装 FFmpeg 的目标目录。
+// ffmpegInstallDir 返回用户数据目录下自动安装 FFmpeg 的备用目录。
 func (a *App) ffmpegInstallDir() string {
 	if base, err := os.UserConfigDir(); err == nil {
 		return filepath.Join(base, "DownTube", "ffmpeg")
@@ -245,7 +263,46 @@ func (a *App) ffmpegInstallDir() string {
 	return ""
 }
 
-// findFFmpeg 依次查找：用户指定路径 → 应用内自动安装 → 系统 PATH。
+// ffmpegPortableDir 返回程序安装目录下的 FFmpeg 目录(优先安装位置)。
+func (a *App) ffmpegPortableDir() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(exe), "ffmpeg")
+}
+
+// ensureWritable 确认目录存在且可写(通过一次探针写入判断)。
+func ensureWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	probe := filepath.Join(dir, ".downtube-write-test")
+	f, err := os.Create(probe)
+	if err != nil {
+		return err
+	}
+	_ = f.Close()
+	return os.Remove(probe)
+}
+
+// ffmpegTargetBinDir 返回导入安装包时 bin 目录的目标位置:
+// 优先程序安装目录(便携/用户级安装通常可写),不可写时回退用户数据目录。
+func (a *App) ffmpegTargetBinDir() (string, error) {
+	if dir := a.ffmpegPortableDir(); dir != "" {
+		if err := ensureWritable(dir); err == nil {
+			return filepath.Join(dir, "bin"), nil
+		}
+	}
+	if dir := a.ffmpegInstallDir(); dir != "" {
+		if err := ensureWritable(dir); err == nil {
+			return filepath.Join(dir, "bin"), nil
+		}
+	}
+	return "", errors.New("无法创建 FFmpeg 安装目录(程序目录不可写)")
+}
+
+// findFFmpeg 依次查找:用户指定路径 → 程序目录内 FFmpeg → 用户数据目录自动安装 → 系统 PATH。
 func (a *App) findFFmpeg() (string, error) {
 	a.mu.Lock()
 	custom := a.store.Settings.FFmpegPath
@@ -253,6 +310,12 @@ func (a *App) findFFmpeg() (string, error) {
 	if custom != "" {
 		if info, err := os.Stat(custom); err == nil && !info.IsDir() {
 			return custom, nil
+		}
+	}
+	if dir := a.ffmpegPortableDir(); dir != "" {
+		auto := filepath.Join(dir, "bin", "ffmpeg.exe")
+		if info, err := os.Stat(auto); err == nil && !info.IsDir() {
+			return auto, nil
 		}
 	}
 	if dir := a.ffmpegInstallDir(); dir != "" {
@@ -825,7 +888,8 @@ func (a *App) emitFFmpegProgress(phase string, received, total int64, message st
 			percent = 100
 		}
 	}
-	if phase == "extract" || phase == "done" {
+	// 解压阶段没有可靠的总量信息,保持 0 由界面侧显示为不确定进度。
+	if phase == "done" {
 		percent = 100
 	}
 	if a.ctx != nil {
@@ -836,12 +900,13 @@ func (a *App) emitFFmpegProgress(phase string, received, total int64, message st
 	}
 }
 
-// InstallFFmpeg 自动下载并安装 FFmpeg 到应用数据目录（优先走用户配置的代理）。
+// InstallFFmpeg 自动下载并安装 FFmpeg(优先走用户配置的代理)。
+// 解压目标优先程序安装目录,不可写时回退用户数据目录。
 func (a *App) InstallFFmpeg() map[string]any {
 	a.mu.Lock()
 	if a.ffmpegInstalling {
 		a.mu.Unlock()
-		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中，请稍候"}
+		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中,请稍候"}
 	}
 	a.ffmpegInstalling = true
 	useProxy, proxyURL := a.store.Settings.UseProxy, a.store.Settings.ProxyURL
@@ -852,13 +917,12 @@ func (a *App) InstallFFmpeg() map[string]any {
 		a.mu.Unlock()
 	}()
 
-	targetDir := a.ffmpegInstallDir()
-	if targetDir == "" {
-		return map[string]any{"ok": false, "message": "无法确定应用数据目录"}
+	binDir, err := a.ffmpegTargetBinDir()
+	if err != nil {
+		return map[string]any{"ok": false, "message": err.Error()}
 	}
-	binDir := filepath.Join(targetDir, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return map[string]any{"ok": false, "message": "创建安装目录失败：" + err.Error()}
+		return map[string]any{"ok": false, "message": "创建安装目录失败:" + err.Error()}
 	}
 
 	tmpZip := filepath.Join(os.TempDir(), "downtube-ffmpeg.zip")
@@ -878,18 +942,79 @@ func (a *App) InstallFFmpeg() map[string]any {
 		}
 	}
 	if downloadErr != nil {
-		return map[string]any{"ok": false, "message": "下载失败：" + downloadErr.Error() + "。如果网络受限，请在设置中开启代理后重试。"}
+		return map[string]any{"ok": false, "message": "下载失败:" + downloadErr.Error() + "。如果网络受限,请在设置中开启代理后重试。"}
 	}
 
-	a.emitFFmpegProgress("extract", 0, 0, "正在解压安装（约需十余秒）…")
-	if err := extractFFmpegZip(tmpZip, binDir); err != nil {
-		return map[string]any{"ok": false, "message": "解压失败：" + err.Error()}
+	a.emitFFmpegProgress("extract", 0, 0, "正在解压安装(约需十余秒)…")
+	if err := extractFFmpegArchive(tmpZip, binDir, nil); err != nil {
+		return map[string]any{"ok": false, "message": "解压失败:" + err.Error()}
 	}
 
 	ffmpegPath := filepath.Join(binDir, "ffmpeg.exe")
 	version, verr := ffmpegVersion(ffmpegPath)
 	if verr != nil {
-		return map[string]any{"ok": false, "message": "安装校验未通过：" + verr.Error()}
+		return map[string]any{"ok": false, "message": "安装校验未通过:" + verr.Error()}
+	}
+
+	a.mu.Lock()
+	a.store.Settings.FFmpegPath = ffmpegPath
+	_ = a.saveLocked()
+	a.mu.Unlock()
+
+	a.emitFFmpegProgress("done", 0, 0, "安装完成")
+	return map[string]any{"ok": true, "path": ffmpegPath, "version": version}
+}
+
+// ImportFFmpegArchive 让用户选择已下载的 FFmpeg 安装包(.7z / .zip),
+// 自动解压到程序目录并配置 bin 下的可执行文件。
+func (a *App) ImportFFmpegArchive() map[string]any {
+	a.mu.Lock()
+	if a.ffmpegInstalling {
+		a.mu.Unlock()
+		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中,请稍候"}
+	}
+	a.ffmpegInstalling = true
+	a.mu.Unlock()
+	defer func() {
+		a.mu.Lock()
+		a.ffmpegInstalling = false
+		a.mu.Unlock()
+	}()
+
+	chosen, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择 FFmpeg 安装包(.7z / .zip)",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "FFmpeg 安装包 (*.7z;*.zip)", Pattern: "*.7z;*.zip"},
+			{DisplayName: "所有文件 (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil || chosen == "" {
+		return map[string]any{"ok": false, "canceled": true}
+	}
+	chosen = filepath.Clean(chosen)
+	switch strings.ToLower(filepath.Ext(chosen)) {
+	case ".7z", ".zip":
+	default:
+		return map[string]any{"ok": false, "message": "仅支持 .7z 或 .zip 格式的安装包"}
+	}
+
+	binDir, err := a.ffmpegTargetBinDir()
+	if err != nil {
+		return map[string]any{"ok": false, "message": err.Error()}
+	}
+
+	a.emitFFmpegProgress("extract", 0, 0, "正在解压安装包…")
+	progress := func(received int64) {
+		a.emitFFmpegProgress("extract", 0, 0, fmt.Sprintf("正在解压(已写出 %.0f MB)…", float64(received)/1048576))
+	}
+	if err := extractFFmpegArchive(chosen, binDir, progress); err != nil {
+		return map[string]any{"ok": false, "message": "解压失败:" + err.Error()}
+	}
+
+	ffmpegPath := filepath.Join(binDir, "ffmpeg.exe")
+	version, verr := ffmpegVersion(ffmpegPath)
+	if verr != nil {
+		return map[string]any{"ok": false, "message": "安装校验未通过:" + verr.Error()}
 	}
 
 	a.mu.Lock()
@@ -955,46 +1080,124 @@ func (a *App) downloadFile(src, dest, proxyURL string) error {
 	return nil
 }
 
-// extractFFmpegZip 从官方/第三方发行包中仅提取 bin 目录下的 ffmpeg.exe 与 ffprobe.exe。
-func extractFFmpegZip(zipPath, destBinDir string) error {
+// extractFFmpegArchive 从 .7z 或 .zip 安装包中仅提取 bin 目录下的 ffmpeg.exe 与 ffprobe.exe。
+// onProgress 可为 nil,收到的是已写出的字节数(压缩包内通常还包含文档等文件,进度仅供提示)。
+func extractFFmpegArchive(archivePath, destBinDir string, onProgress func(int64)) error {
+	if err := os.MkdirAll(destBinDir, 0o755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(archivePath); err != nil {
+		return errors.New("安装包文件不存在或不可读")
+	}
+	switch strings.ToLower(filepath.Ext(archivePath)) {
+	case ".7z":
+		return extractSevenZip(archivePath, destBinDir, onProgress)
+	case ".zip":
+		return extractZip(archivePath, destBinDir, onProgress)
+	default:
+		return errors.New("不支持的压缩格式,请选择 .7z 或 .zip 安装包")
+	}
+}
+
+// ffmpegBinEntry 判断压缩包条目是否为 bin 目录下的目标可执行文件,返回规范化文件名。
+func ffmpegBinEntry(name string, isDir bool) (string, bool) {
+	if isDir {
+		return "", false
+	}
+	slashed := strings.ReplaceAll(filepath.ToSlash(name), "\\", "/")
+	base := strings.ToLower(path.Base(slashed))
+	if base != "ffmpeg.exe" && base != "ffprobe.exe" {
+		return "", false
+	}
+	if strings.ToLower(path.Base(path.Dir(slashed))) != "bin" {
+		return "", false
+	}
+	return base, true
+}
+
+// progressReader 包装解压流,按节流节奏回调已读字节数。
+type progressReader struct {
+	r          io.Reader
+	onProgress func(int64)
+	received   int64
+	last       time.Time
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.received += int64(n)
+		now := time.Now()
+		if now.Sub(p.last) >= 400*time.Millisecond {
+			p.last = now
+			p.onProgress(p.received)
+		}
+	}
+	return n, err
+}
+
+// writeEntry 将压缩包内一个条目写出到目标 bin 目录。
+func writeEntry(name, destBinDir string, open func() (io.ReadCloser, error), onProgress func(int64)) error {
+	rc, err := open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	out, err := os.Create(filepath.Join(destBinDir, name))
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	var src io.Reader = rc
+	if onProgress != nil {
+		src = &progressReader{r: rc, onProgress: onProgress}
+	}
+	_, err = io.Copy(out, src)
+	return err
+}
+
+func extractZip(zipPath, destBinDir string, onProgress func(int64)) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
-	wanted := map[string]bool{"ffmpeg.exe": true, "ffprobe.exe": true}
 	extracted := 0
 	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
+		name, ok := ffmpegBinEntry(f.Name, f.FileInfo().IsDir())
+		if !ok {
 			continue
 		}
-		slashed := filepath.ToSlash(f.Name)
-		if !strings.Contains(slashed, "/bin/") {
-			continue
-		}
-		name := filepath.Base(slashed)
-		if !wanted[name] {
-			continue
-		}
-		rc, err := f.Open()
-		if err != nil {
+		if err := writeEntry(name, destBinDir, f.Open, onProgress); err != nil {
 			return err
-		}
-		out, err := os.Create(filepath.Join(destBinDir, name))
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		_, cerr := io.Copy(out, rc)
-		out.Close()
-		rc.Close()
-		if cerr != nil {
-			return cerr
 		}
 		extracted++
 	}
 	if extracted < 2 {
-		return errors.New("压缩包结构异常（未找到 ffmpeg.exe / ffprobe.exe）")
+		return errors.New("压缩包结构异常(未找到 bin 目录下的 ffmpeg.exe / ffprobe.exe)")
+	}
+	return nil
+}
+
+func extractSevenZip(archivePath, destBinDir string, onProgress func(int64)) error {
+	r, err := sevenzip.OpenReader(archivePath)
+	if err != nil {
+		return fmt.Errorf("无法读取 7z 压缩包:%w", err)
+	}
+	defer r.Close()
+	extracted := 0
+	for _, f := range r.File {
+		name, ok := ffmpegBinEntry(f.Name, f.FileInfo().IsDir())
+		if !ok {
+			continue
+		}
+		if err := writeEntry(name, destBinDir, f.Open, onProgress); err != nil {
+			return err
+		}
+		extracted++
+	}
+	if extracted < 2 {
+		return errors.New("压缩包结构异常(未找到 bin 目录下的 ffmpeg.exe / ffprobe.exe)")
 	}
 	return nil
 }
@@ -1030,6 +1233,18 @@ func (a *App) OpenDownloadFolder() error {
 		return err
 	}
 	return exec.Command("explorer.exe", dir).Start()
+}
+
+// OpenDataFolder 打开程序数据目录(存放 state.json 与回退安装的组件)。
+func (a *App) OpenDataFolder() error {
+	if base, err := os.UserConfigDir(); err == nil {
+		dir := filepath.Join(base, "DownTube")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+		return exec.Command("explorer.exe", dir).Start()
+	}
+	return errors.New("无法确定程序数据目录")
 }
 
 func (a *App) load() {
