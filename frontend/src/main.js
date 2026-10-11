@@ -92,7 +92,7 @@ const state = {
   tasks: [],
   filter: '',
   quality: '1080p',
-  type: '视频 + 音频',
+  type: '视频（带音频）',
   folder: '',
   useProxy: false,
   proxyURL: 'http://127.0.0.1:10809',
@@ -341,10 +341,9 @@ function queueSummary() {
 }
 
 function queueRunButtons() {
-  const canRun = state.tasks.some(t => ['等待中', '已暂停', '失败'].includes(t.status))
   const running = state.tasks.some(t => t.status === '准备中')
   if (running) return `<button class="btn btn-ghost btn-sm" id="pauseAll">${icon('pause', 14)}全部暂停</button>`
-  return `<button class="btn btn-ghost btn-sm" id="startAll" ${canRun ? '' : 'disabled'}>${icon('play', 14)}全部开始</button>`
+  return `<button class="btn btn-ghost btn-sm" id="startAll" ${state.tasks.length ? '' : 'disabled'}>${icon('play', 14)}全部开始</button>`
 }
 
 function renderQueueView() {
@@ -470,7 +469,7 @@ function renderSettingsSection(id) {
         <div class="set-card-body">
           <div class="form-grid">
             <div class="field"><span>默认视频画质</span>${selectControl('quality', ['2160p · 4K', '1440p', '1080p', '720p', '480p', '最佳可用'], state.quality, '默认视频画质')}</div>
-            <div class="field"><span>下载内容</span>${selectControl('downloadType', ['视频 + 音频', '仅视频', '仅音频 · MP3', '仅音频 · FLAC'], state.type, '下载内容')}</div>
+            <div class="field"><span>下载内容</span>${selectControl('downloadType', ['视频（带音频）', '仅视频', '仅音频 · MP3', '仅音频 · FLAC'], state.type, '下载内容')}</div>
             <div class="field"><span>视频编码</span>${selectControl('videoCodec', [{ value: 'auto', label: '智能匹配 · H.264 优先' }, { value: 'hevc', label: 'H.265 · 下载后转码' }], state.videoCodec, '视频编码')}</div>
           </div>
           <div class="divider"></div>
@@ -1007,6 +1006,7 @@ async function handleTask(action, id) {
   }
   if (!t) return
   if (action === 'start') {
+    if (t.status === '已完成') { toast('该任务已经下载完毕'); return }
     if (backend()?.StartTask) applySnapshot(await backend().StartTask(id))
     else { t.status = '失败'; t.error = '桌面版下载引擎尚未配置' }
     const fresh = state.tasks.find(x => x.id === id)
@@ -1021,6 +1021,11 @@ async function handleTask(action, id) {
 }
 
 async function startAll() {
+  const startable = state.tasks.some(t => ['等待中', '已暂停', '失败'].includes(t.status))
+  if (state.tasks.length && !startable) {
+    toast(state.tasks.some(t => t.status === '已完成') ? '已经下载完毕' : '没有可开始的任务')
+    return
+  }
   if (backend()?.StartAllTasks) applySnapshot(await backend().StartAllTasks())
   else toast('全部开始需要在桌面程序中运行')
   render()
@@ -1069,7 +1074,7 @@ function revertSettings() {
 }
 function resetSettings() {
   state.quality = '1080p'
-  state.type = '视频 + 音频'
+  state.type = '视频（带音频）'
   state.useProxy = false
   state.autoDetectProxy = true
   state.useBrowserCookie = false

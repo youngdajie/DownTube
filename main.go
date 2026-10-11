@@ -97,6 +97,7 @@ type App struct {
 	storePath        string
 	workers          map[int]context.CancelFunc
 	retryAttempts    map[int]int
+	bestProgress     map[int]int
 	autoRun          bool
 	ffmpegInstalling bool
 	disableEvents    bool
@@ -132,7 +133,7 @@ func defaultSettings() Settings {
 		dir, _ = os.Getwd()
 	}
 	return Settings{
-		Quality: "1080p", DownloadType: "视频 + 音频",
+		Quality: "1080p", DownloadType: "视频（带音频）",
 		DownloadDir: filepath.Join(dir, "Downloads", "DownTube"),
 		ProxyURL:    "http://127.0.0.1:10809", AutoDetectProxy: true,
 		CookieBrowser: "Chrome",
@@ -142,7 +143,7 @@ func defaultSettings() Settings {
 }
 
 func NewApp() *App {
-	app := &App{store: Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()}, workers: make(map[int]context.CancelFunc), retryAttempts: make(map[int]int), titleJobs: make(chan struct{}, 2)}
+	app := &App{store: Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()}, workers: make(map[int]context.CancelFunc), retryAttempts: make(map[int]int), bestProgress: make(map[int]int), titleJobs: make(chan struct{}, 2)}
 	if base, err := os.UserConfigDir(); err == nil {
 		app.storePath = filepath.Join(base, "DownTube", "state.json")
 		app.load()
@@ -164,7 +165,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.mu.Unlock()
 	for _, j := range jobs {
-		a.resolveTitleAsync(j.id, j.url)
+		a.resolveTitleAsync(j.id, j.url, false)
 	}
 }
 
@@ -452,7 +453,8 @@ func (a *App) fetchTitle(url string) string {
 }
 
 // resolveTitleAsync 在后台解析任务标题（并发上限 2）。
-func (a *App) resolveTitleAsync(id int, url string) {
+// autoStart 为 true 时(新添加的链接),解析完成或失败后自动接入下载。
+func (a *App) resolveTitleAsync(id int, url string, autoStart bool) {
 	go func() {
 		a.titleJobs <- struct{}{}
 		defer func() { <-a.titleJobs }()
@@ -461,7 +463,50 @@ func (a *App) resolveTitleAsync(id int, url string) {
 		} else {
 			a.markTitleUnresolved(id)
 		}
+		if autoStart {
+			a.autoStartAfterResolve(id)
+		}
 	}()
+}
+
+// autoStartAfterResolve 解析结束后自动开始该任务:
+// 有空闲并发位时立即下载,否则留在队列,由调度器在有空位时接上。
+func (a *App) autoStartAfterResolve(id int) {
+	a.mu.Lock()
+	engine, engineErr := findYTDLP()
+	var launches []launchSpec
+	started := false
+	for i := range a.store.Tasks {
+		t := &a.store.Tasks[i]
+		if t.ID != id {
+			continue
+		}
+		// 用户已暂停/移除,或任务已进入其他流程时不做干预
+		if t.Status != StatusQueued || t.Phase != "" {
+			break
+		}
+		if engineErr != nil || a.ctx == nil {
+			break
+		}
+		a.autoRun = true
+		if len(a.workers) < a.maxConcurrentLocked() {
+			ctx, cancel := context.WithCancel(a.ctx)
+			a.workers[id] = cancel
+			t.Status = StatusRunning
+			t.Error = ""
+			t.Phase = ""
+			launches = append(launches, launchSpec{id: id, task: *t, ctx: ctx, engine: engine})
+			started = true
+		}
+		break
+	}
+	_ = a.saveLocked()
+	snapshot := a.snapshotLocked()
+	a.mu.Unlock()
+	a.dispatch(launches)
+	if started {
+		a.emit(snapshot)
+	}
 }
 
 // markTitleUnresolved 把尚未解析出标题的占位文案替换掉,避免一直停留在"正在获取"。
@@ -527,7 +572,7 @@ func (a *App) AddLinks(input string) Snapshot {
 	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
 	for _, j := range jobs {
-		a.resolveTitleAsync(j.id, j.url)
+		a.resolveTitleAsync(j.id, j.url, true)
 	}
 	return snapshot
 }
@@ -541,6 +586,7 @@ func (a *App) RemoveTask(id int) Snapshot {
 				delete(a.workers, id)
 			}
 			delete(a.retryAttempts, id)
+			delete(a.bestProgress, id)
 			a.store.Tasks = append(a.store.Tasks[:i], a.store.Tasks[i+1:]...)
 			break
 		}
@@ -565,6 +611,7 @@ func (a *App) ClearTasks() Snapshot {
 	}
 	a.workers = make(map[int]context.CancelFunc)
 	a.retryAttempts = make(map[int]int)
+	a.bestProgress = make(map[int]int)
 	a.store.Tasks = []Task{}
 	_ = a.saveLocked()
 	return a.snapshotLocked()
@@ -608,6 +655,7 @@ func (a *App) fillSlotsLocked(engine string, engineErr error) []launchSpec {
 				t.Phase = ""
 				t.Error = engineErr.Error()
 				delete(a.retryAttempts, t.ID)
+				delete(a.bestProgress, t.ID)
 			}
 		}
 		a.autoRun = false
@@ -653,6 +701,7 @@ func (a *App) StartTask(id int) Snapshot {
 		}
 		// 手动开始视为重新出发,清掉历史重试计数与阶段提示
 		delete(a.retryAttempts, id)
+		delete(a.bestProgress, id)
 		t.Error = ""
 		t.Phase = ""
 		if engineErr != nil {
@@ -691,6 +740,7 @@ func (a *App) StartAllTasks() Snapshot {
 			t.Error = ""
 			t.Phase = ""
 			delete(a.retryAttempts, t.ID)
+			delete(a.bestProgress, t.ID)
 		}
 	}
 	engine, engineErr := findYTDLP()
@@ -774,10 +824,13 @@ func (a *App) scheduleRetry(id int, delay time.Duration) {
 					a.workers[id] = cancel
 					t.Status = StatusRunning
 					t.Phase = ""
+					// 重试已经开始:清掉上一次失败的错误文案,避免运行/转码期间还挂着旧报错
+					t.Error = ""
 					launches = append(launches, launchSpec{id: id, task: *t, ctx: ctx, engine: engine})
 				} else {
 					// 还没有空位:转回普通排队,由调度器接上
 					t.Phase = ""
+					t.Error = ""
 					a.autoRun = true
 				}
 				break
@@ -811,12 +864,12 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		_, _ = fmt.Sscanf(strings.TrimSuffix(settings.Quality, "p"), "%d", &maxHeight)
 	}
 	if settings.HighFrameRate {
-		// 帧率优先,其次是兼容性最好的 H.264 + AAC(mp4)组合
-		args = append(args, "-S", "fps,codec:avc:m4a")
+		// 分辨率优先,其次帧率,再偏好兼容性最好的 H.264 + AAC(mp4)组合
+		args = append(args, "-S", "res,fps,codec:avc:m4a")
 	} else {
-		// 输出偏好:H.264 + AAC(mp4),播放兼容性最好;
+		// 分辨率优先,再偏好 H.264 + AAC(mp4),播放兼容性最好;
 		// 高画质档位没有对应编码时(如 4K 的 AV1/VP9)自动回退,不影响清晰度选择
-		args = append(args, "-S", "codec:avc:m4a")
+		args = append(args, "-S", "res,codec:avc:m4a")
 	}
 	audioOnly := strings.HasPrefix(settings.DownloadType, "仅音频")
 	// H.265 需要在下载完成后重新编码;音频模式无需转码
@@ -850,6 +903,8 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	} else if maxHeight > 0 {
 		args = append(args, "-f", fmt.Sprintf("bv*[height<=%d]+ba/b[height<=%d]", maxHeight, maxHeight))
 	}
+	// "视频（带音频）"会下载两路流并合并为单文件:仅在此时校验同名旧文件是否带音轨
+	wantsAudioMerge := !audioOnly && settings.DownloadType != "仅视频" && ffmpegErr == nil
 	args = appendNetworkArgs(args, settings)
 	if ffmpegErr == nil {
 		args = append(args, "--ffmpeg-location", ffmpegPath)
@@ -863,23 +918,76 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		a.finishTask(id, fmt.Errorf("创建保存目录失败：%w", err))
 		return
 	}
+	res, err := a.execDownload(ctx, id, engine, args, settings)
+	if ctx.Err() != nil {
+		a.mu.Lock()
+		delete(a.workers, id)
+		eng, engErr := findYTDLP()
+		launches := a.fillSlotsLocked(eng, engErr)
+		_ = a.saveLocked()
+		snapshot := a.snapshotLocked()
+		a.mu.Unlock()
+		a.dispatch(launches)
+		a.emit(snapshot)
+		return
+	}
+	// 合并模式下整轮没有任何下载进度,说明命中了「同名文件已存在」的跳过:
+	// 校验已有文件是否真的包含音轨,不包含时把旧文件改名保留并重新下载一次,
+	// 避免「视频（带音频）」最终留下的是无声的旧文件
+	if err == nil && wantsAudioMerge && !res.sawProgress && res.finalPath != "" {
+		if !fileHasAudio(ffmpegPath, res.finalPath) {
+			if moveAsideExisting(res.finalPath) != "" {
+				res, err = a.execDownload(ctx, id, engine, args, settings)
+			}
+		}
+	}
+	if err == nil {
+		// 清理与成品同名的残留中间文件(旧流文件、断点文件、转码临时文件)
+		cleanupStreamRemnants(res.finalPath)
+	}
+	if err == nil && hevcRecode {
+		if terr := a.transcodeToHEVC(ctx, id, res.finalPath, res.duration, ffmpegPath); terr != nil {
+			// 转码失败:原视频已保留,不再进入自动重试(重试会重复下载)
+			a.finishTaskEx(id, fmt.Errorf("下载已完成，但 H.265 转码失败：%v（原视频已保留）", terr), false)
+			return
+		}
+	}
+	detail := res.stderrText
+	if err != nil && detail != "" {
+		detail = extractErrorLines(detail)
+		if hint := transcriptHints(detail, settings, ffmpegErr != nil); hint != "" {
+			detail += hint
+		}
+		err = fmt.Errorf("%w: %s", err, detail)
+	}
+	a.finishTask(id, err)
+}
+
+// dlResult 记录一轮 yt-dlp 下载进程的输出结果。
+type dlResult struct {
+	stderrText  string
+	finalPath   string
+	duration    float64
+	sawProgress bool
+}
+
+// execDownload 运行一次 yt-dlp 下载并解析进度、标题与输出路径标记行。
+func (a *App) execDownload(ctx context.Context, id int, engine string, args []string, settings Settings) (dlResult, error) {
+	res := dlResult{}
 	cmd := exec.CommandContext(ctx, engine, args...)
 	// 隐藏控制台窗口，并禁用 Python 输出缓冲，保证进度行实时到达。
 	hideConsoleWindow(cmd)
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		a.finishTask(id, err)
-		return
+		return res, err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		a.finishTask(id, err)
-		return
+		return res, err
 	}
 	if err := cmd.Start(); err != nil {
-		a.finishTask(id, err)
-		return
+		return res, err
 	}
 	stderrText := make(chan string, 1)
 	go func() {
@@ -893,8 +1001,6 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	expectedStreams := 1
 	streamsSeen := 0
 	lastFingerprint := ""
-	finalPath := ""
-	var finalDuration float64
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "__DOWNTUBE_TITLE__") {
@@ -910,15 +1016,16 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 			raw := strings.TrimPrefix(line, "__DTPATH__")
 			var p string
 			if json.Unmarshal([]byte(raw), &p) == nil {
-				finalPath = p
+				res.finalPath = p
 			}
 		} else if strings.HasPrefix(line, "__DTDUR__") {
 			raw := strings.TrimSpace(strings.TrimPrefix(line, "__DTDUR__"))
 			var d float64
 			if _, scanErr := fmt.Sscanf(raw, "%f", &d); scanErr == nil {
-				finalDuration = d
+				res.duration = d
 			}
 		} else if strings.HasPrefix(line, "__DTPROGRESS__") {
+			res.sawProgress = true
 			payload := strings.TrimPrefix(line, "__DTPROGRESS__")
 			parts := strings.Split(payload, "|")
 			if len(parts) == 0 {
@@ -961,34 +1068,123 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		}
 	}
 	err = cmd.Wait()
-	detail := <-stderrText
-	if ctx.Err() != nil {
-		a.mu.Lock()
-		delete(a.workers, id)
-		eng, engErr := findYTDLP()
-		launches := a.fillSlotsLocked(eng, engErr)
-		_ = a.saveLocked()
-		snapshot := a.snapshotLocked()
-		a.mu.Unlock()
-		a.dispatch(launches)
-			a.emit(snapshot)
+	res.stderrText = <-stderrText
+	return res, err
+}
+
+// fileHasAudio 检查媒体文件是否包含音频流;ffprobe 不可用时返回 true(不做干预)。
+func fileHasAudio(ffmpegPath, mediaPath string) bool {
+	probe := filepath.Join(filepath.Dir(ffmpegPath), "ffprobe.exe")
+	if info, err := os.Stat(probe); err != nil || info.IsDir() {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", mediaPath)
+	hideConsoleWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(out)) != ""
+}
+
+// moveAsideExisting 把已存在的同名文件改名保留(追加「 (旧文件)」后缀),返回新路径;失败返回空串。
+func moveAsideExisting(path string) string {
+	ext := filepath.Ext(path)
+	stem := strings.TrimSuffix(path, ext)
+	for i := 1; i <= 20; i++ {
+		suffix := " (旧文件)"
+		if i > 1 {
+			suffix = fmt.Sprintf(" (旧文件 %d)", i)
+		}
+		candidate := stem + suffix + ext
+		if _, err := os.Stat(candidate); err == nil {
+			continue
+		}
+		if os.Rename(path, candidate) == nil {
+			return candidate
+		}
+		return ""
+	}
+	return ""
+}
+
+// cleanupStreamRemnants 清理与成品同名的残留中间文件
+// (yt-dlp 的 f<id> 流文件、.part 断点文件、转码临时文件),避免下载目录堆积零散文件。
+// 只处理 3 分钟以前修改过的文件,不会影响其他任务正在写入的内容。
+func cleanupStreamRemnants(finalPath string) {
+	if finalPath == "" {
 		return
 	}
-	if err == nil && hevcRecode {
-		if terr := a.transcodeToHEVC(ctx, id, finalPath, finalDuration, ffmpegPath); terr != nil {
-			// 转码失败:原视频已保留,不再进入自动重试(重试会重复下载)
-			a.finishTaskEx(id, fmt.Errorf("下载已完成，但 H.265 转码失败：%v（原视频已保留）", terr), false)
-			return
+	dir := filepath.Dir(finalPath)
+	base := strings.TrimSuffix(filepath.Base(finalPath), filepath.Ext(finalPath))
+	if base == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-3 * time.Minute)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, base+".") {
+			continue
+		}
+		if !isRemnantName(name[len(base)+1:]) {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, name))
+	}
+}
+
+// isRemnantName 判断去掉成品文件名前缀后的剩余部分是否为下载/转码中间产物。
+func isRemnantName(rest string) bool {
+	if strings.HasPrefix(rest, "hevc-tmp.") || strings.HasSuffix(rest, ".hevc-bak") {
+		return true
+	}
+	if body := strings.TrimSuffix(rest, ".part"); body != rest {
+		return isFormatTagged(body) || isPlainExt(body)
+	}
+	return isFormatTagged(rest)
+}
+
+// isFormatTagged 匹配 yt-dlp 的流文件命名(如 f137.mp4、f251.m4a)。
+func isFormatTagged(s string) bool {
+	if len(s) < 3 || s[0] != 'f' {
+		return false
+	}
+	dot := strings.IndexByte(s, '.')
+	if dot < 2 || dot == len(s)-1 {
+		return false
+	}
+	for _, r := range s[1:dot] {
+		if r < '0' || r > '9' {
+			return false
 		}
 	}
-	if err != nil && detail != "" {
-		detail = extractErrorLines(detail)
-		if hint := transcriptHints(detail, settings, ffmpegErr != nil); hint != "" {
-			detail += hint
-		}
-		err = fmt.Errorf("%w: %s", err, detail)
+	return true
+}
+
+// isPlainExt 匹配单层扩展名(如 mp4、webm,用于 *.part 断点文件)。
+func isPlainExt(s string) bool {
+	if s == "" || strings.Contains(s, ".") {
+		return false
 	}
-	a.finishTask(id, err)
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 // transcodeToHEVC 用 ffmpeg 把下载好的视频重新编码为 H.265(HEVC),
@@ -1246,6 +1442,17 @@ func (a *App) updateProgress(id int, progress int, phase string) {
 		}
 		break
 	}
+	// 进度超过此前的最高水平,说明重试后下载确实恢复推进:
+	// 连续失败计数归零,之后再失败会从「重试中(1/N)」重新开始
+	if a.bestProgress == nil {
+		a.bestProgress = make(map[int]int)
+	}
+	if progress > a.bestProgress[id] {
+		a.bestProgress[id] = progress
+		if a.retryAttempts[id] > 0 {
+			delete(a.retryAttempts, id)
+		}
+	}
 	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
 	if changed {
@@ -1277,6 +1484,7 @@ func (a *App) finishTaskEx(id int, err error, allowRetry bool) {
 			t.Phase = ""
 			t.Error = ""
 			delete(a.retryAttempts, id)
+			delete(a.bestProgress, id)
 			openFolder = a.store.Settings.OpenOnComplete
 		} else {
 			maxRetry := a.store.Settings.AutoRetry
@@ -1301,6 +1509,7 @@ func (a *App) finishTaskEx(id int, err error, allowRetry bool) {
 				t.Phase = ""
 				t.Error = err.Error()
 				delete(a.retryAttempts, id)
+				delete(a.bestProgress, id)
 			}
 		}
 		break
@@ -1341,7 +1550,7 @@ func (a *App) SaveSettings(settings Settings) Snapshot {
 		settings.Quality = "1080p"
 	}
 	if settings.DownloadType == "" {
-		settings.DownloadType = "视频 + 音频"
+		settings.DownloadType = "视频（带音频）"
 	}
 	if settings.DownloadDir == "" {
 		settings.DownloadDir = defaultSettings().DownloadDir
@@ -1897,6 +2106,10 @@ func (a *App) load() {
 			saved.Settings.AutoRetry = 2
 		}
 		saved.Version = 2
+	}
+	// 下载内容的文案调整:"视频 + 音频" 更名为 "视频（带音频）"
+	if saved.Settings.DownloadType == "视频 + 音频" {
+		saved.Settings.DownloadType = "视频（带音频）"
 	}
 	if saved.Tasks == nil {
 		saved.Tasks = []Task{}
