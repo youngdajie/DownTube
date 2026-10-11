@@ -14,6 +14,10 @@ export function ClearTasks() {
   return window['go']['main']['App']['ClearTasks']();
 }
 
+export function GetHEVCEncoderStatus() {
+  return window['go']['main']['App']['GetHEVCEncoderStatus']();
+}
+
 export function GetSettings() {
   return window['go']['main']['App']['GetSettings']();
 }

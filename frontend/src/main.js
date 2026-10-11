@@ -107,6 +107,8 @@ const state = {
   maxConcurrent: 3,
   autoRetry: 2,
   videoCodec: 'auto',
+  hevcEncoder: 'auto',
+  encoderHint: '',
   engineReady: false,
   engineError: '',
   ffmpegReady: false,
@@ -183,6 +185,7 @@ function applySnapshot(snapshot) {
   state.maxConcurrent = Math.max(1, Math.min(6, parseInt(s.maxConcurrent, 10) || 3))
   state.autoRetry = Math.max(0, Math.min(5, s.autoRetry == null ? 2 : parseInt(s.autoRetry, 10) || 0))
   state.videoCodec = s.videoCodec === 'hevc' ? 'hevc' : 'auto'
+  state.hevcEncoder = s.hevcEncoder === 'cpu' ? 'cpu' : 'auto'
 }
 async function refreshSnapshot() {
   const api = backend()
@@ -240,6 +243,7 @@ function render() {
   `
   bind()
   syncWindowButtons()
+  if (state.page === 'settings' && state.settingsSection === 'format') refreshEncoderHint()
   state.enterAnim = false
   const newContent = root.querySelector('.content')
   if (newContent) newContent.scrollTop = keepScroll
@@ -471,6 +475,7 @@ function renderSettingsSection(id) {
             <div class="field"><span>默认视频画质</span>${selectControl('quality', ['2160p · 4K', '1440p', '1080p', '720p', '480p', '最佳可用'], state.quality, '默认视频画质')}</div>
             <div class="field"><span>下载内容</span>${selectControl('downloadType', ['视频（带音频）', '仅视频', '仅音频 · MP3', '仅音频 · FLAC'], state.type, '下载内容')}</div>
             <div class="field"><span>视频编码</span>${selectControl('videoCodec', [{ value: 'auto', label: '智能匹配 · H.264 优先' }, { value: 'hevc', label: 'H.265 · 下载后转码' }], state.videoCodec, '视频编码')}</div>
+            <div class="field"><span>H.265 编码器</span>${selectControl('hevcEncoder', [{ value: 'auto', label: '智能加速 · 优先显卡' }, { value: 'cpu', label: 'CPU · 压缩率更高' }], state.hevcEncoder, 'H.265 编码器')}<small class="field-hint" id="encoderHint">${safe(state.encoderHint)}</small></div>
           </div>
           <div class="divider"></div>
           <div class="row-split">
@@ -821,6 +826,7 @@ root.addEventListener('click', event => {
     if (setting === 'maxConcurrent') state.maxConcurrent = Math.max(1, Math.min(6, parseInt(value, 10) || 3))
     if (setting === 'autoRetry') state.autoRetry = Math.max(0, Math.min(5, parseInt(value, 10) || 0))
     if (setting === 'videoCodec') state.videoCodec = value === 'hevc' ? 'hevc' : 'auto'
+    if (setting === 'hevcEncoder') state.hevcEncoder = value === 'cpu' ? 'cpu' : 'auto'
     state.settingsDirty = true
     select.querySelector('.select-current').textContent = option.querySelector('span').textContent
     select.querySelectorAll('.select-option').forEach(item => {
@@ -1061,6 +1067,7 @@ function settingsSnapshot() {
     highFrameRate: state.highFrameRate, openOnComplete: state.openOnComplete,
     maxConcurrent: state.maxConcurrent, autoRetry: state.autoRetry,
     videoCodec: state.videoCodec,
+    hevcEncoder: state.hevcEncoder,
   }
 }
 function captureSettingsBaseline() {
@@ -1083,6 +1090,7 @@ function resetSettings() {
   state.maxConcurrent = 3
   state.autoRetry = 2
   state.videoCodec = 'auto'
+  state.hevcEncoder = 'auto'
   state.settingsDirty = true
   render(); toast('已恢复默认值，点击「保存」生效')
 }
@@ -1157,14 +1165,36 @@ async function saveSettings() {
     maxConcurrent: state.maxConcurrent,
     autoRetry: state.autoRetry,
     videoCodec: state.videoCodec,
+    hevcEncoder: state.hevcEncoder,
   }
   state.folder = settings.downloadDir
   state.proxyURL = settings.proxyURL
   state.settingsDirty = false
   if (backend()?.SaveSettings) applySnapshot(await backend().SaveSettings(settings))
+  state.encoderHint = ''
   state.settingsBaseline = settingsSnapshot()
   await refreshSystemStatus()
   render(); toast('设置已保存到本机')
+}
+
+// 检测并展示可用的 H.265 显卡编码器(探测结果由后端缓存,仅首次较慢)
+async function refreshEncoderHint() {
+  const el = document.querySelector('#encoderHint')
+  if (!el) return
+  if (state.encoderHint) { el.textContent = state.encoderHint; return }
+  el.textContent = '正在检测显卡编码器…'
+  const api = backend()
+  if (!api?.GetHEVCEncoderStatus) { el.textContent = ''; return }
+  try {
+    const st = await api.GetHEVCEncoderStatus()
+    let text = ''
+    if (!st || st.ok === false) text = (st && st.message) || ''
+    else if (st.gpu) text = `已检测到 ${st.label}，转码速度更快`
+    else text = st.message || '未检测到可用的显卡编码器，将使用 CPU 转码'
+    state.encoderHint = text
+    const live = document.querySelector('#encoderHint')
+    if (live) live.textContent = text
+  } catch { el.textContent = '' }
 }
 
 async function testProxy() {

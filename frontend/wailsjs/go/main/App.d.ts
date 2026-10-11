@@ -8,6 +8,8 @@ export function CheckBrowserRunning(arg1:string):Promise<boolean>;
 
 export function ClearTasks():Promise<main.Snapshot>;
 
+export function GetHEVCEncoderStatus():Promise<Record<string, any>>;
+
 export function GetSettings():Promise<main.Settings>;
 
 export function GetSystemStatus():Promise<Record<string, any>>;

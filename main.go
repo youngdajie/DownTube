@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,7 @@ type Settings struct {
 	MaxConcurrent    int    `json:"maxConcurrent"`
 	AutoRetry        int    `json:"autoRetry"`
 	VideoCodec       string `json:"videoCodec"`
+	HevcEncoder      string `json:"hevcEncoder"`
 }
 
 type Snapshot struct {
@@ -102,6 +104,10 @@ type App struct {
 	ffmpegInstalling bool
 	disableEvents    bool
 	titleJobs        chan struct{}
+	hevcMu           sync.Mutex
+	hevcProbed       bool
+	hevcProbedFor    string
+	hevcGPU          *hevcEncoderSpec
 }
 
 type titleJob struct {
@@ -138,7 +144,7 @@ func defaultSettings() Settings {
 		ProxyURL:    "http://127.0.0.1:10809", AutoDetectProxy: true,
 		CookieBrowser: "Chrome",
 		MaxConcurrent: 3, AutoRetry: 2,
-		VideoCodec: "auto",
+		VideoCodec: "auto", HevcEncoder: "auto",
 	}
 }
 
@@ -947,6 +953,19 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	}
 	if err == nil && hevcRecode {
 		if terr := a.transcodeToHEVC(ctx, id, res.finalPath, res.duration, ffmpegPath); terr != nil {
+			if ctx.Err() != nil {
+				// 用户暂停或退出导致的中断:原文件与已完成的转码片段都保留,任务维持原状态,恢复时续跑
+				a.mu.Lock()
+				delete(a.workers, id)
+				eng, engErr := findYTDLP()
+				launches := a.fillSlotsLocked(eng, engErr)
+				_ = a.saveLocked()
+				snapshot := a.snapshotLocked()
+				a.mu.Unlock()
+				a.dispatch(launches)
+				a.emit(snapshot)
+				return
+			}
 			// 转码失败:原视频已保留,不再进入自动重试(重试会重复下载)
 			a.finishTaskEx(id, fmt.Errorf("下载已完成，但 H.265 转码失败：%v（原视频已保留）", terr), false)
 			return
@@ -1187,12 +1206,25 @@ func isPlainExt(s string) bool {
 	return true
 }
 
+// transcodeLocks 保证同一源文件的转码串行执行(重复添加同一视频时避免共用工作目录互相干扰)。
+var transcodeLocks sync.Map
+
+func lockTranscode(srcPath string) func() {
+	v, _ := transcodeLocks.LoadOrStore(srcPath, &sync.Mutex{})
+	mu := v.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // transcodeToHEVC 用 ffmpeg 把下载好的视频重新编码为 H.265(HEVC),
-// 过程中上报"转码 H.265 中"进度;成功后替换原文件,输出统一为 .mp4。
+// 默认优先显卡加速(自动探测 NVENC / QSV / AMF,不可用或编码失败时回退 CPU);
+// 转码按片段执行,暂停/中断后重新开始会复用已完成片段续跑,成功后替换原文件。
 func (a *App) transcodeToHEVC(ctx context.Context, id int, srcPath string, duration float64, ffmpegPath string) error {
 	if srcPath == "" {
 		return errors.New("未获取到下载文件路径")
 	}
+	unlock := lockTranscode(srcPath)
+	defer unlock()
 	if _, err := os.Stat(srcPath); err != nil {
 		return fmt.Errorf("找不到下载文件：%v", err)
 	}
@@ -1200,16 +1232,325 @@ func (a *App) transcodeToHEVC(ctx context.Context, id int, srcPath string, durat
 	tmpPath := strings.TrimSuffix(outPath, filepath.Ext(outPath)) + ".hevc-tmp.mp4"
 	defer os.Remove(tmpPath)
 
-	a.updateProgress(id, 0, "转码 H.265 中")
+	// 编码器:默认优先显卡加速(NVENC / QSV / AMF,自动探测),失败时回退 CPU
+	settings := a.GetSettings()
+	spec := hevcCPUSpec()
+	gpuOK := false
+	if settings.HevcEncoder != "cpu" {
+		if detected, ok := a.resolveHEVCVideoEncoder(ffmpegPath); ok {
+			spec, gpuOK = detected, true
+		}
+	}
+	encodeErr := a.transcodeSegmented(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
+	if encodeErr != nil && gpuOK && ctx.Err() == nil {
+		// 显卡编码失败(驱动/位深/分辨率限制等):清理临时文件后回退 CPU 再试一次
+		_ = os.Remove(tmpPath)
+		encodeErr = a.transcodeSegmented(ctx, id, ffmpegPath, srcPath, tmpPath, duration, hevcCPUSpec())
+	}
+	if encodeErr != nil {
+		return encodeErr
+	}
+	// 用"挪走-替换-清理"三步完成替换,中途失败时可回滚,不会丢失原文件
+	backup := outPath + ".hevc-bak"
+	_ = os.Remove(backup)
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		if err := os.Rename(outPath, backup); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		_ = os.Rename(backup, outPath) // 回滚
+		return err
+	}
+	_ = os.Remove(backup)
+	if srcPath != outPath {
+		_ = os.Remove(srcPath)
+	}
+	return nil
+}
+
+// hevcSegmentSeconds 转码分片的目标时长(秒)。分片保证中断后可复用已完成片段续跑。
+const hevcSegmentSeconds = 30
+
+// hevcSegment 描述一个待编码的分片及它在源视频中的时间范围。
+type hevcSegment struct {
+	path       string
+	start, end float64
+}
+
+func (s hevcSegment) dur() float64 {
+	d := s.end - s.start
+	if d <= 0 {
+		d = hevcSegmentSeconds
+	}
+	return d
+}
+
+// hevcPartsDir 返回某个源文件对应的转码工作目录(与源文件同目录,便于续跑时定位)。
+func hevcPartsDir(srcPath string) string {
+	return strings.TrimSuffix(srcPath, filepath.Ext(srcPath)) + ".hevc-parts"
+}
+
+// transcodeSegmented 把源视频切分为若干片段分别编码,全部完成后拼接为 tmpPath。
+// 已完成的片段会被直接复用,因此暂停、关闭程序或编码失败后再次执行时会从断点继续。
+func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPath, tmpPath string, duration float64, spec hevcEncoderSpec) error {
+	partsDir := hevcPartsDir(srcPath)
+	segDir := filepath.Join(partsDir, "seg")
+	encDir := filepath.Join(partsDir, "enc")
+	csvPath := filepath.Join(partsDir, "segments.csv")
+	markerPath := filepath.Join(partsDir, "source.info")
+
+	// 源文件发生变化(重新下载等)时废弃旧的片段缓存
+	info, err := os.Stat(srcPath)
+	if err != nil {
+		return err
+	}
+	marker := fmt.Sprintf("%d|%d", info.Size(), info.ModTime().UnixNano())
+	if data, rerr := os.ReadFile(markerPath); rerr == nil && strings.TrimSpace(string(data)) != marker {
+		_ = os.RemoveAll(partsDir)
+	}
+	if err := os.MkdirAll(encDir, 0o755); err != nil {
+		return err
+	}
+	_ = os.WriteFile(markerPath, []byte(marker), 0o644)
+
+	// 1) 切分:缺失或不完整时执行(切分失败时回退整段转码)
+	segments, err := readSegmentList(csvPath, segDir)
+	if err != nil {
+		_ = os.RemoveAll(segDir)
+		_ = os.MkdirAll(segDir, 0o755)
+		_ = os.Remove(csvPath)
+		a.updateProgress(id, 0, "转码 H.265 中")
+		if serr := splitSource(ctx, ffmpegPath, srcPath, segDir, csvPath); serr != nil {
+			return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
+		}
+		segments, err = readSegmentList(csvPath, segDir)
+		if err != nil {
+			return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
+		}
+	}
+
+	total := duration
+	if total <= 0 {
+		total = segments[len(segments)-1].end
+	}
+
+	// 2) 逐片编码:已存在的片段文件直接复用(断点续跑)
+	done := 0.0
+	for i, seg := range segments {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
+		outPath := filepath.Join(encDir, fmt.Sprintf("out-%04d.mp4", i))
+		if fi, ferr := os.Stat(outPath); ferr == nil && fi.Size() > 0 {
+			done += seg.dur()
+			continue
+		}
+		if eerr := a.encodeSegment(ctx, id, ffmpegPath, seg.path, outPath, done, total, spec); eerr != nil {
+			return eerr
+		}
+		done += seg.dur()
+	}
+
+	// 3) 拼接为成品
+	a.updateProgress(id, 99, "转码 H.265 中")
+	listPath := filepath.Join(partsDir, "concat.txt")
+	var list strings.Builder
+	for i := range segments {
+		list.WriteString(fmt.Sprintf("file 'enc/out-%04d.mp4'\n", i))
+	}
+	if werr := os.WriteFile(listPath, []byte(list.String()), 0o644); werr != nil {
+		return werr
+	}
 	cmd := exec.CommandContext(ctx, ffmpegPath,
+		"-y", "-hide_banner", "-loglevel", "error",
+		"-f", "concat", "-safe", "0", "-i", listPath,
+		"-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart",
+		tmpPath)
+	hideConsoleWindow(cmd)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("拼接转码片段失败：%s", ffmpegErrText(err, stderrBuf.Bytes()))
+	}
+	// 拼接结果自检:时长与预期明显不符时视为失败并重置缓存,避免产出被截断的成品
+	if total > 0 {
+		if got, derr := probeDuration(ffmpegPath, tmpPath); derr == nil && (got < total-2 || got > total+2) {
+			_ = os.RemoveAll(partsDir)
+			return fmt.Errorf("拼接结果时长异常（%.1f 秒，预期 %.1f 秒），已重置转码缓存", got, total)
+		}
+	}
+	_ = os.RemoveAll(partsDir)
+	return nil
+}
+
+// splitSource 用流拷贝把源视频按关键帧切分为 mkv 片段,并写出 CSV(名称,起点,终点)。
+func splitSource(ctx context.Context, ffmpegPath, srcPath, segDir, csvPath string) error {
+	cmd := exec.CommandContext(ctx, ffmpegPath,
+		"-y", "-hide_banner", "-loglevel", "error",
+		"-i", srcPath,
+		"-c", "copy",
+		"-f", "segment",
+		"-segment_time", fmt.Sprint(hevcSegmentSeconds),
+		"-reset_timestamps", "1",
+		"-segment_format", "matroska",
+		"-segment_list", csvPath,
+		"-segment_list_type", "csv",
+		filepath.Join(segDir, "seg-%04d.mkv"))
+	hideConsoleWindow(cmd)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("切分源视频失败：%s", ffmpegErrText(err, stderrBuf.Bytes()))
+	}
+	return nil
+}
+
+// readSegmentList 读取切分产出的 CSV,并校验片段文件存在且非空。
+func readSegmentList(csvPath, segDir string) ([]hevcSegment, error) {
+	data, err := os.ReadFile(csvPath)
+	if err != nil {
+		return nil, err
+	}
+	var out []hevcSegment
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		fields := strings.Split(strings.TrimSpace(line), ",")
+		if len(fields) < 3 {
+			continue
+		}
+		name := filepath.Base(strings.TrimSpace(fields[0]))
+		start, e1 := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
+		end, e2 := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
+		if e1 != nil || e2 != nil {
+			continue
+		}
+		p := filepath.Join(segDir, name)
+		fi, ferr := os.Stat(p)
+		if ferr != nil || fi.Size() == 0 {
+			return nil, errors.New("分片文件缺失")
+		}
+		out = append(out, hevcSegment{path: p, start: start, end: end})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("分片列表为空")
+	}
+	return out, nil
+}
+
+// encodeSegment 编码单个片段,并把片段内的编码进度折算为整体进度上报。
+func (a *App) encodeSegment(ctx context.Context, id int, ffmpegPath, segPath, outPath string, doneDur, totalDur float64, spec hevcEncoderSpec) error {
+	phase := "转码 H.265 中"
+	if spec.phase != "" {
+		phase = "转码 H.265 中(" + spec.phase + ")"
+	}
+	if totalDur > 0 {
+		percent := int(doneDur / totalDur * 100)
+		if percent > 99 {
+			percent = 99
+		}
+		a.updateProgress(id, percent, phase)
+	}
+	args := []string{
+		"-y", "-hide_banner", "-loglevel", "error",
+		"-progress", "pipe:1", "-nostats",
+		"-i", segPath,
+	}
+	args = append(args, spec.videoArgs...)
+	// 先写临时文件,编码成功后再原子改名:中断产生的半成品不会被续跑误用
+	tmpOut := strings.TrimSuffix(outPath, ".mp4") + ".tmp.mp4"
+	defer os.Remove(tmpOut)
+	args = append(args, "-tag:v", "hvc1", "-c:a", "copy", tmpOut)
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	hideConsoleWindow(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "out_time_us=") {
+			continue
+		}
+		var us int64
+		if _, scanErr := fmt.Sscanf(strings.TrimPrefix(line, "out_time_us="), "%d", &us); scanErr != nil {
+			continue
+		}
+		if totalDur <= 0 {
+			continue
+		}
+		percent := int((doneDur + float64(us)/1e6) / totalDur * 100)
+		if percent > 99 {
+			percent = 99
+		}
+		if percent < 0 {
+			percent = 0
+		}
+		a.updateProgress(id, percent, phase)
+	}
+	if err := cmd.Wait(); err != nil {
+		return errors.New(ffmpegErrText(err, stderrBuf.Bytes()))
+	}
+	if err := os.Rename(tmpOut, outPath); err != nil {
+		return err
+	}
+	return nil
+}
+
+// probeDuration 用 ffprobe 读取媒体文件时长(秒)。
+func probeDuration(ffmpegPath, mediaPath string) (float64, error) {
+	probe := filepath.Join(filepath.Dir(ffmpegPath), "ffprobe.exe")
+	if _, err := os.Stat(probe); err != nil {
+		return 0, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, probe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", mediaPath)
+	hideConsoleWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
+}
+
+// ffmpegErrText 把 ffmpeg 的失败归类为可读的错误文本。
+func ffmpegErrText(err error, stderr []byte) string {
+	msg := strings.TrimSpace(decodeOutput(stderr))
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	if msg == "" {
+		msg = err.Error()
+	}
+	return msg
+}
+
+// runTranscode 执行一次 H.265 编码并在过程中上报进度。
+func (a *App) runTranscode(ctx context.Context, id int, ffmpegPath, srcPath, tmpPath string, duration float64, spec hevcEncoderSpec) error {
+	phase := "转码 H.265 中"
+	if spec.phase != "" {
+		phase = "转码 H.265 中(" + spec.phase + ")"
+	}
+	a.updateProgress(id, 0, phase)
+	args := []string{
 		"-y", "-hide_banner", "-loglevel", "error",
 		"-progress", "pipe:1", "-nostats",
 		"-i", srcPath,
-		"-c:v", "libx265", "-preset", "medium", "-crf", "26",
+	}
+	args = append(args, spec.videoArgs...)
+	args = append(args,
 		"-tag:v", "hvc1", "-movflags", "+faststart",
 		"-c:a", "copy",
 		tmpPath,
 	)
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	hideConsoleWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1241,7 +1582,7 @@ func (a *App) transcodeToHEVC(ctx context.Context, id int, srcPath string, durat
 		if percent < 0 {
 			percent = 0
 		}
-		a.updateProgress(id, percent, "转码 H.265 中")
+		a.updateProgress(id, percent, phase)
 	}
 	if err := cmd.Wait(); err != nil {
 		msg := strings.TrimSpace(decodeOutput(stderrBuf.Bytes()))
@@ -1253,23 +1594,86 @@ func (a *App) transcodeToHEVC(ctx context.Context, id int, srcPath string, durat
 		}
 		return errors.New(msg)
 	}
-	// 用"挪走-替换-清理"三步完成替换,中途失败时可回滚,不会丢失原文件
-	backup := outPath + ".hevc-bak"
-	_ = os.Remove(backup)
-	if _, statErr := os.Stat(outPath); statErr == nil {
-		if err := os.Rename(outPath, backup); err != nil {
-			return err
+	return nil
+}
+
+// hevcEncoderSpec 描述一套 H.265 编码参数。
+type hevcEncoderSpec struct {
+	id        string   // nvenc / qsv / amf / cpu
+	label     string   // 完整名称(设置页展示)
+	phase     string   // 任务阶段后缀
+	videoArgs []string // ffmpeg 视频编码参数
+}
+
+func hevcCPUSpec() hevcEncoderSpec {
+	return hevcEncoderSpec{
+		id: "cpu", label: "CPU(libx265)", phase: "CPU",
+		videoArgs: []string{"-c:v", "libx265", "-preset", "medium", "-crf", "26"},
+	}
+}
+
+// hevcGPUCandidates 显卡编码器候选(按优先级探测);参数只有在该机器上探测通过才会使用。
+var hevcGPUCandidates = []hevcEncoderSpec{
+	{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "26", "-b:v", "0"}},
+	{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "26"}},
+	{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"}},
+}
+
+// probeHEVCEncoder 用一小段合成画面实测编码器在当前机器上是否可用
+// (驱动缺失、显卡不支持等情况会失败),避免选到名义存在但实际不可用的编码器。
+func probeHEVCEncoder(ffmpegPath string, spec hevcEncoderSpec) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	args := []string{
+		"-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=c=black:s=640x360:r=30:d=0.5",
+	}
+	args = append(args, spec.videoArgs...)
+	args = append(args, "-an", "-f", "null", "-")
+	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
+	hideConsoleWindow(cmd)
+	return cmd.Run() == nil
+}
+
+// resolveHEVCVideoEncoder 探测可用的显卡编码器并缓存结果(FFmpeg 路径变化时重新探测)。
+// 返回是否找到显卡编码器;未找到时返回 CPU 方案。
+func (a *App) resolveHEVCVideoEncoder(ffmpegPath string) (hevcEncoderSpec, bool) {
+	a.hevcMu.Lock()
+	defer a.hevcMu.Unlock()
+	if a.hevcProbed && a.hevcProbedFor == ffmpegPath {
+		if a.hevcGPU != nil {
+			return *a.hevcGPU, true
+		}
+		return hevcCPUSpec(), false
+	}
+	var found *hevcEncoderSpec
+	for i := range hevcGPUCandidates {
+		if probeHEVCEncoder(ffmpegPath, hevcGPUCandidates[i]) {
+			spec := hevcGPUCandidates[i]
+			found = &spec
+			break
 		}
 	}
-	if err := os.Rename(tmpPath, outPath); err != nil {
-		_ = os.Rename(backup, outPath) // 回滚
-		return err
+	a.hevcProbed = true
+	a.hevcProbedFor = ffmpegPath
+	a.hevcGPU = found
+	if found != nil {
+		return *found, true
 	}
-	_ = os.Remove(backup)
-	if srcPath != outPath {
-		_ = os.Remove(srcPath)
+	return hevcCPUSpec(), false
+}
+
+// GetHEVCEncoderStatus 返回当前设备可用的 H.265 显卡编码器(探测结果缓存,供设置页展示)。
+func (a *App) GetHEVCEncoderStatus() map[string]any {
+	ffmpegPath, err := a.findFFmpeg()
+	if err != nil {
+		return map[string]any{"ok": false, "gpu": false, "message": "未检测到 FFmpeg，无法使用 H.265 转码"}
 	}
-	return nil
+	spec, ok := a.resolveHEVCVideoEncoder(ffmpegPath)
+	if ok {
+		return map[string]any{"ok": true, "gpu": true, "encoder": spec.id, "label": spec.label}
+	}
+	return map[string]any{"ok": true, "gpu": false, "encoder": "cpu", "label": "CPU(libx265)", "message": "未检测到可用的显卡编码器，将使用 CPU 转码"}
 }
 
 // decodeOutput 把 yt-dlp 的输出解码为 UTF-8:Windows 下 Python 的错误信息常为 GBK 编码。
@@ -1575,6 +1979,9 @@ func (a *App) SaveSettings(settings Settings) Snapshot {
 	}
 	if settings.VideoCodec != "hevc" {
 		settings.VideoCodec = "auto"
+	}
+	if settings.HevcEncoder != "cpu" {
+		settings.HevcEncoder = "auto"
 	}
 	a.store.Settings = settings
 	_ = a.saveLocked()
