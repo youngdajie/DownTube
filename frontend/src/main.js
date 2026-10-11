@@ -104,6 +104,9 @@ const state = {
   browserRunning: false,
   highFrameRate: true,
   openOnComplete: false,
+  maxConcurrent: 3,
+  autoRetry: 2,
+  videoCodec: 'auto',
   engineReady: false,
   engineError: '',
   ffmpegReady: false,
@@ -177,6 +180,9 @@ function applySnapshot(snapshot) {
   state.ffmpegPath = s.ffmpegPath || ''
   state.highFrameRate = s.highFrameRate !== false
   state.openOnComplete = !!s.openOnComplete
+  state.maxConcurrent = Math.max(1, Math.min(6, parseInt(s.maxConcurrent, 10) || 3))
+  state.autoRetry = Math.max(0, Math.min(5, s.autoRetry == null ? 2 : parseInt(s.autoRetry, 10) || 0))
+  state.videoCodec = s.videoCodec === 'hevc' ? 'hevc' : 'auto'
 }
 async function refreshSnapshot() {
   const api = backend()
@@ -375,17 +381,18 @@ function renderTable(list) {
 }
 
 function taskSig(t) {
-  return `${t.status}|${t.progress}|${t.title}|${t.error || ''}|${t.quality}`
+  return `${t.status}|${t.phase || ''}|${t.progress}|${t.title}|${t.error || ''}|${t.quality}`
 }
 
 function taskRow(t) {
   const statusClass = STATUS_CLASS[t.status] || 'waiting'
+  const statusText = t.phase || t.status
   const active = t.status === '准备中'
   const canStart = ['等待中', '已暂停', '失败'].includes(t.status)
   const sub = t.error ? `<span class="task-sub error">${safe(t.error)}</span>` : `<span class="task-sub">${safe(shortURL(t.url))}</span>`
   return `<tr data-id="${t.id}" data-sig="${safe(taskSig(t))}">
     <td><div class="task-cell"><span class="task-thumb">${icon('video', 16)}</span><div class="task-copy"><b class="task-title" title="${safe(t.title)}">${safe(t.title)}</b>${sub}</div></div></td>
-    <td><span class="status ${statusClass}"><i></i>${safe(t.status)}</span></td>
+    <td><span class="status ${statusClass}"><i></i>${safe(statusText)}</span></td>
     <td><div class="progress-cell"><div class="progress-track"><span class="progress-fill ${t.status === '已完成' ? 'is-done' : ''}" style="width:${t.progress}%"></span></div><span class="progress-num">${t.progress}%</span></div></td>
     <td><span class="tag">${safe(t.quality || '默认')}</span></td>
     <td><div class="row-actions">
@@ -445,16 +452,26 @@ function renderSettingsSection(id) {
             <label class="switch"><input id="openOnComplete" type="checkbox" ${state.openOnComplete ? 'checked' : ''}><span></span></label>
           </div>
         </div>
+      </div>
+      <div class="set-card">
+        <div class="set-card-head"><b>下载行为</b><p>同时下载的任务数量，以及出错时的处理方式</p></div>
+        <div class="set-card-body">
+          <div class="form-grid">
+            <div class="field"><span>同时下载的任务数</span>${selectControl('maxConcurrent', [1, 2, 3, 4, 5].map(n => ({ value: String(n), label: `${n} 个` })), String(state.maxConcurrent), '同时下载的任务数')}</div>
+            <div class="field"><span>下载失败时自动重试</span>${selectControl('autoRetry', [0, 1, 2, 3].map(n => ({ value: String(n), label: n === 0 ? '不重试' : `${n} 次` })), String(state.autoRetry), '自动重试次数')}</div>
+          </div>
+        </div>
       </div>`
   }
   if (id === 'format') {
     return `
       <div class="set-card">
-        <div class="set-card-head"><b>画质与格式</b><p>新任务默认采用以下设置，可在任务开始前调整</p></div>
+        <div class="set-card-head"><b>画质与格式</b><p>新任务默认采用以下设置；H.265 在下载完成后用 FFmpeg 转码，耗时与视频长度相关</p></div>
         <div class="set-card-body">
           <div class="form-grid">
             <div class="field"><span>默认视频画质</span>${selectControl('quality', ['2160p · 4K', '1440p', '1080p', '720p', '480p', '最佳可用'], state.quality, '默认视频画质')}</div>
-            <div class="field"><span>下载内容</span>${selectControl('downloadType', ['视频 + 音频', '仅视频', '仅音频 · MP3'], state.type, '下载内容')}</div>
+            <div class="field"><span>下载内容</span>${selectControl('downloadType', ['视频 + 音频', '仅视频', '仅音频 · MP3', '仅音频 · FLAC'], state.type, '下载内容')}</div>
+            <div class="field"><span>视频编码</span>${selectControl('videoCodec', [{ value: 'auto', label: '智能匹配 · H.264 优先' }, { value: 'hevc', label: 'H.265 · 下载后转码' }], state.videoCodec, '视频编码')}</div>
           </div>
           <div class="divider"></div>
           <div class="row-split">
@@ -560,7 +577,10 @@ function renderSettingsSection(id) {
 
 function selectControl(setting, options, value, ariaLabel) {
   const id = `select-${setting}`
-  return `<div class="md-select" data-setting="${setting}"><button class="select-trigger" type="button" id="${id}" aria-label="${ariaLabel}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${id}-menu"><span class="select-current">${safe(value)}</span><span class="select-chevron">${icon('chevron', 16)}</span></button><div class="select-menu" id="${id}-menu" role="listbox" aria-labelledby="${id}">${options.map(option => `<button class="select-option ${option === value ? 'selected' : ''}" type="button" role="option" tabindex="-1" data-value="${safe(option)}" aria-selected="${option === value}"><span>${safe(option)}</span><span class="select-check">${icon('check', 15)}</span></button>`).join('')}</div></div>`
+  const items = options.map(o => (typeof o === 'string' ? { value: o, label: o } : o))
+  const current = items.find(o => o.value === String(value))
+  const currentLabel = current ? current.label : String(value)
+  return `<div class="md-select" data-setting="${setting}"><button class="select-trigger" type="button" id="${id}" aria-label="${ariaLabel}" aria-haspopup="listbox" aria-expanded="false" aria-controls="${id}-menu"><span class="select-current">${safe(currentLabel)}</span><span class="select-chevron">${icon('chevron', 16)}</span></button><div class="select-menu" id="${id}-menu" role="listbox" aria-labelledby="${id}">${items.map(item => `<button class="select-option ${item.value === String(value) ? 'selected' : ''}" type="button" role="option" tabindex="-1" data-value="${safe(item.value)}" aria-selected="${item.value === String(value)}"><span>${safe(item.label)}</span><span class="select-check">${icon('check', 15)}</span></button>`).join('')}</div></div>`
 }
 
 // ---------------- 关于页 ----------------
@@ -799,8 +819,11 @@ root.addEventListener('click', event => {
     if (setting === 'quality') state.quality = value
     if (setting === 'downloadType') state.type = value
     if (setting === 'cookieBrowser') state.cookieBrowser = value
+    if (setting === 'maxConcurrent') state.maxConcurrent = Math.max(1, Math.min(6, parseInt(value, 10) || 3))
+    if (setting === 'autoRetry') state.autoRetry = Math.max(0, Math.min(5, parseInt(value, 10) || 0))
+    if (setting === 'videoCodec') state.videoCodec = value === 'hevc' ? 'hevc' : 'auto'
     state.settingsDirty = true
-    select.querySelector('.select-current').textContent = value
+    select.querySelector('.select-current').textContent = option.querySelector('span').textContent
     select.querySelectorAll('.select-option').forEach(item => {
       const selected = item === option
       item.classList.toggle('selected', selected)
@@ -1031,6 +1054,8 @@ function settingsSnapshot() {
     useBrowserCookie: state.useBrowserCookie, cookieSource: state.cookieSource,
     cookieBrowser: state.cookieBrowser, cookieFile: state.cookieFile,
     highFrameRate: state.highFrameRate, openOnComplete: state.openOnComplete,
+    maxConcurrent: state.maxConcurrent, autoRetry: state.autoRetry,
+    videoCodec: state.videoCodec,
   }
 }
 function captureSettingsBaseline() {
@@ -1050,6 +1075,9 @@ function resetSettings() {
   state.useBrowserCookie = false
   state.highFrameRate = true
   state.openOnComplete = false
+  state.maxConcurrent = 3
+  state.autoRetry = 2
+  state.videoCodec = 'auto'
   state.settingsDirty = true
   render(); toast('已恢复默认值，点击「保存」生效')
 }
@@ -1064,13 +1092,13 @@ async function browseCookieFile() {
   const api = backend()
   if (!api?.SelectCookieFile) { toast('桌面版中可使用文件选择器'); return }
   try {
-    const file = await api.SelectCookieFile()
-    if (file) {
-      state.cookieFile = file
-      state.settingsDirty = true
-      render()
-      toast('已选择 Cookies 文件')
-    }
+    const result = await api.SelectCookieFile()
+    if (!result || result.canceled) return
+    if (!result.ok) { toast(result.message || 'Cookies 文件不可用'); return }
+    state.cookieFile = result.path
+    state.settingsDirty = true
+    render()
+    toast(result.note ? `已选择 Cookies 文件：${result.note}` : '已选择 Cookies 文件')
   } catch (error) { toast(`选择文件失败：${error.message}`) }
 }
 
@@ -1121,6 +1149,9 @@ async function saveSettings() {
     ffmpegPath: state.ffmpegPath,
     highFrameRate: state.highFrameRate,
     openOnComplete: state.openOnComplete,
+    maxConcurrent: state.maxConcurrent,
+    autoRetry: state.autoRetry,
+    videoCodec: state.videoCodec,
   }
   state.folder = settings.downloadDir
   state.proxyURL = settings.proxyURL

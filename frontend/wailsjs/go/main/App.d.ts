@@ -46,7 +46,7 @@ export function ReportFrontendError(arg1:string):Promise<void>;
 
 export function SaveSettings(arg1:main.Settings):Promise<main.Snapshot>;
 
-export function SelectCookieFile():Promise<string>;
+export function SelectCookieFile():Promise<Record<string, any>>;
 
 export function SelectFFmpegFile():Promise<Record<string, any>>;
 

@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bufio"
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -21,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bodgit/sevenzip"
 	"github.com/wailsapp/wails/v2"
@@ -29,6 +31,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 //go:embed all:frontend/dist
@@ -49,6 +52,7 @@ type Task struct {
 	URL       string     `json:"url"`
 	Title     string     `json:"title"`
 	Status    TaskStatus `json:"status"`
+	Phase     string     `json:"phase,omitempty"`
 	Progress  int        `json:"progress"`
 	Quality   string     `json:"quality"`
 	CreatedAt time.Time  `json:"createdAt"`
@@ -69,6 +73,9 @@ type Settings struct {
 	FFmpegPath       string `json:"ffmpegPath"`
 	HighFrameRate    bool   `json:"highFrameRate"`
 	OpenOnComplete   bool   `json:"openOnComplete"`
+	MaxConcurrent    int    `json:"maxConcurrent"`
+	AutoRetry        int    `json:"autoRetry"`
+	VideoCodec       string `json:"videoCodec"`
 }
 
 type Snapshot struct {
@@ -89,8 +96,10 @@ type App struct {
 	store            Store
 	storePath        string
 	workers          map[int]context.CancelFunc
+	retryAttempts    map[int]int
 	autoRun          bool
 	ffmpegInstalling bool
+	disableEvents    bool
 	titleJobs        chan struct{}
 }
 
@@ -127,11 +136,13 @@ func defaultSettings() Settings {
 		DownloadDir: filepath.Join(dir, "Downloads", "DownTube"),
 		ProxyURL:    "http://127.0.0.1:10809", AutoDetectProxy: true,
 		CookieBrowser: "Chrome",
+		MaxConcurrent: 3, AutoRetry: 2,
+		VideoCodec: "auto",
 	}
 }
 
 func NewApp() *App {
-	app := &App{store: Store{Version: 1, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()}, workers: make(map[int]context.CancelFunc), titleJobs: make(chan struct{}, 2)}
+	app := &App{store: Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()}, workers: make(map[int]context.CancelFunc), retryAttempts: make(map[int]int), titleJobs: make(chan struct{}, 2)}
 	if base, err := os.UserConfigDir(); err == nil {
 		app.storePath = filepath.Join(base, "DownTube", "state.json")
 		app.load()
@@ -147,7 +158,7 @@ func (a *App) startup(ctx context.Context) {
 	a.mu.Lock()
 	jobs := []titleJob{}
 	for _, t := range a.store.Tasks {
-		if t.Title == "" || t.Title == "待获取视频信息" || t.Title == "正在获取视频信息…" {
+		if t.Title == "" || t.Title == "待获取视频信息" || t.Title == "正在获取视频信息…" || strings.HasPrefix(t.Title, "未获取到标题") {
 			jobs = append(jobs, titleJob{id: t.ID, url: t.URL})
 		}
 	}
@@ -204,22 +215,16 @@ func (a *App) shutdown(context.Context) {
 
 func clone[T any](items []T) []T { return append([]T{}, items...) }
 
-// nextRunnableLocked 在 autoRun 模式下寻找下一个待运行任务；调用方须持有锁。
-func (a *App) nextRunnableLocked() int {
-	if !a.autoRun {
-		return 0
-	}
-	for _, task := range a.store.Tasks {
-		if task.Status == StatusQueued || task.Status == StatusPaused {
-			return task.ID
-		}
-	}
-	a.autoRun = false
-	return 0
-}
-
 func (a *App) snapshotLocked() Snapshot {
 	return Snapshot{Tasks: clone(a.store.Tasks), Settings: a.store.Settings}
+}
+
+// emit 向界面广播状态快照;无界面上下文(如自动化测试)时跳过。
+func (a *App) emit(snapshot Snapshot) {
+	if a.ctx == nil || a.disableEvents {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "state:updated", snapshot)
 }
 
 func (a *App) Snapshot() Snapshot {
@@ -399,8 +404,12 @@ func appendNetworkArgs(args []string, settings Settings) []string {
 		args = append(args, "--proxy", settings.ProxyURL)
 	}
 	if settings.UseBrowserCookie {
-		if settings.CookieSource == "file" && settings.CookieFile != "" {
-			args = append(args, "--cookies", settings.CookieFile)
+		if settings.CookieSource == "file" {
+			// 明确选择"从文件导入"时只用文件;没选文件就不带 cookies,
+			// 不悄悄回退到浏览器方式,避免用错身份导致下载异常。
+			if settings.CookieFile != "" {
+				args = append(args, "--cookies", settings.CookieFile)
+			}
 		} else {
 			browserName := strings.ToLower(settings.CookieBrowser)
 			if browserName == "microsoft edge" {
@@ -412,30 +421,34 @@ func appendNetworkArgs(args []string, settings Settings) []string {
 	return args
 }
 
-// fetchTitle 用 yt-dlp 仅解析标题（不下载），失败时返回空字符串。
+// fetchTitle 用 yt-dlp 仅解析标题(不下载),失败自动重试一次,仍失败返回空字符串。
 func (a *App) fetchTitle(url string) string {
 	engine, err := findYTDLP()
 	if err != nil {
 		return ""
 	}
 	settings := a.GetSettings()
-	args := []string{"--skip-download", "--no-warnings", "--print", "%(title)j"}
+	args := []string{"--skip-download", "--no-warnings", "--no-playlist", "--socket-timeout", "15", "--print", "%(title)j"}
 	args = appendNetworkArgs(args, settings)
 	args = append(args, url)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, engine, args...)
-	hideConsoleWindow(cmd)
-	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
+	for attempt := 0; attempt < 2; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		cmd := exec.CommandContext(ctx, engine, args...)
+		hideConsoleWindow(cmd)
+		cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+		out, err := cmd.Output()
+		cancel()
+		if err == nil {
+			var title string
+			if json.Unmarshal([]byte(strings.TrimSpace(string(out))), &title) == nil && strings.TrimSpace(title) != "" {
+				return strings.TrimSpace(title)
+			}
+		}
+		if attempt == 0 {
+			time.Sleep(1200 * time.Millisecond)
+		}
 	}
-	var title string
-	if json.Unmarshal([]byte(strings.TrimSpace(string(out))), &title) != nil {
-		return ""
-	}
-	return strings.TrimSpace(title)
+	return ""
 }
 
 // resolveTitleAsync 在后台解析任务标题（并发上限 2）。
@@ -445,8 +458,32 @@ func (a *App) resolveTitleAsync(id int, url string) {
 		defer func() { <-a.titleJobs }()
 		if title := a.fetchTitle(url); title != "" {
 			a.updateTitle(id, title)
+		} else {
+			a.markTitleUnresolved(id)
 		}
 	}()
+}
+
+// markTitleUnresolved 把尚未解析出标题的占位文案替换掉,避免一直停留在"正在获取"。
+func (a *App) markTitleUnresolved(id int) {
+	a.mu.Lock()
+	changed := false
+	for i := range a.store.Tasks {
+		t := &a.store.Tasks[i]
+		if t.ID != id {
+			continue
+		}
+		if t.Title == "正在获取视频信息…" || t.Title == "待获取视频信息" || t.Title == "" {
+			t.Title = "未获取到标题，下载时自动解析"
+			changed = true
+		}
+		break
+	}
+	snapshot := a.snapshotLocked()
+	a.mu.Unlock()
+	if changed {
+		a.emit(snapshot)
+	}
 }
 
 func (a *App) GetTasks() []Task { return a.Snapshot().Tasks }
@@ -497,19 +534,26 @@ func (a *App) AddLinks(input string) Snapshot {
 
 func (a *App) RemoveTask(id int) Snapshot {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	for i := range a.store.Tasks {
 		if a.store.Tasks[i].ID == id {
 			if cancel := a.workers[id]; cancel != nil {
-				a.autoRun = false
 				cancel()
+				delete(a.workers, id)
 			}
+			delete(a.retryAttempts, id)
 			a.store.Tasks = append(a.store.Tasks[:i], a.store.Tasks[i+1:]...)
 			break
 		}
 	}
+	// 移除占用的并发位后,让排队任务继续
+	engine, engineErr := findYTDLP()
+	launches := a.fillSlotsLocked(engine, engineErr)
 	_ = a.saveLocked()
-	return a.snapshotLocked()
+	snapshot := a.snapshotLocked()
+	a.mu.Unlock()
+	a.dispatch(launches)
+	a.emit(snapshot)
+	return snapshot
 }
 
 func (a *App) ClearTasks() Snapshot {
@@ -520,80 +564,171 @@ func (a *App) ClearTasks() Snapshot {
 		cancel()
 	}
 	a.workers = make(map[int]context.CancelFunc)
+	a.retryAttempts = make(map[int]int)
 	a.store.Tasks = []Task{}
 	_ = a.saveLocked()
 	return a.snapshotLocked()
 }
 
+// ============================================================
+// 下载调度:并发执行 + 失败自动重试
+// ============================================================
+
+// maxConcurrentLocked 返回归一化后的并发下载上限(1-6,默认 3)。调用方须持有锁。
+func (a *App) maxConcurrentLocked() int {
+	n := a.store.Settings.MaxConcurrent
+	if n <= 0 {
+		n = 3
+	}
+	if n > 6 {
+		n = 6
+	}
+	return n
+}
+
+// launchSpec 描述一个待启动的下载任务(锁内收集,锁外启动)。
+type launchSpec struct {
+	id     int
+	task   Task
+	ctx    context.Context
+	engine string
+}
+
+// fillSlotsLocked 在自动调度模式下把排队任务填入并发空位,返回待启动清单。
+// 调用方须持有锁;"等待重试"中的任务(Phase 非空)由定时器单独拉起。
+func (a *App) fillSlotsLocked(engine string, engineErr error) []launchSpec {
+	if !a.autoRun || a.ctx == nil {
+		return nil
+	}
+	if engineErr != nil {
+		for i := range a.store.Tasks {
+			t := &a.store.Tasks[i]
+			if t.Status == StatusQueued {
+				t.Status = StatusFailed
+				t.Phase = ""
+				t.Error = engineErr.Error()
+				delete(a.retryAttempts, t.ID)
+			}
+		}
+		a.autoRun = false
+		return nil
+	}
+	var out []launchSpec
+	for i := range a.store.Tasks {
+		if len(a.workers) >= a.maxConcurrentLocked() {
+			break
+		}
+		t := &a.store.Tasks[i]
+		if t.Status != StatusQueued || t.Phase != "" {
+			continue
+		}
+		ctx, cancel := context.WithCancel(a.ctx)
+		a.workers[t.ID] = cancel
+		t.Status = StatusRunning
+		t.Error = ""
+		out = append(out, launchSpec{id: t.ID, task: *t, ctx: ctx, engine: engine})
+	}
+	return out
+}
+
+// dispatch 在锁外启动收集到的任务。
+func (a *App) dispatch(launches []launchSpec) {
+	for _, l := range launches {
+		go a.runTask(l.ctx, l.id, l.engine, l.task)
+	}
+}
+
+// StartTask 启动单个任务:有空闲并发位时立即开始,否则进入等待队列。
 func (a *App) StartTask(id int) Snapshot {
 	a.mu.Lock()
 	engine, engineErr := findYTDLP()
-	var task Task
+	var launches []launchSpec
 	for i := range a.store.Tasks {
 		t := &a.store.Tasks[i]
-		if t.ID == id && (t.Status == StatusQueued || t.Status == StatusPaused || t.Status == StatusFailed) {
-			if len(a.workers) > 0 {
-				a.autoRun = true
-				t.Status = StatusQueued
-				t.Error = ""
-			} else if engineErr != nil {
-				t.Status = StatusFailed
-				t.Error = engineErr.Error()
-			} else {
-				ctx, cancel := context.WithCancel(a.ctx)
-				a.workers[id] = cancel
-				t.Status = StatusRunning
-				t.Error = ""
-				task = *t
-				go a.runTask(ctx, id, engine, task)
-			}
+		if t.ID != id {
+			continue
+		}
+		if t.Status != StatusQueued && t.Status != StatusPaused && t.Status != StatusFailed {
 			break
 		}
+		// 手动开始视为重新出发,清掉历史重试计数与阶段提示
+		delete(a.retryAttempts, id)
+		t.Error = ""
+		t.Phase = ""
+		if engineErr != nil {
+			t.Status = StatusFailed
+			t.Error = engineErr.Error()
+			break
+		}
+		if len(a.workers) < a.maxConcurrentLocked() {
+			ctx, cancel := context.WithCancel(a.ctx)
+			a.workers[id] = cancel
+			t.Status = StatusRunning
+			launches = append(launches, launchSpec{id: id, task: *t, ctx: ctx, engine: engine})
+		} else {
+			// 并发已满:进入等待队列,由自动调度在有空位时接上
+			a.autoRun = true
+			t.Status = StatusQueued
+		}
+		break
 	}
 	_ = a.saveLocked()
 	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "state:updated", snapshot)
-	}
+	a.dispatch(launches)
+	a.emit(snapshot)
 	return snapshot
 }
 
+// StartAllTasks 把所有待下载任务排队,并按并发上限依次开始。
 func (a *App) StartAllTasks() Snapshot {
 	a.mu.Lock()
 	a.autoRun = true
-	nextID := 0
-	for _, task := range a.store.Tasks {
-		if task.Status == StatusQueued || task.Status == StatusPaused || task.Status == StatusFailed {
-			nextID = task.ID
-			break
+	for i := range a.store.Tasks {
+		t := &a.store.Tasks[i]
+		if t.Status == StatusPaused || t.Status == StatusFailed {
+			t.Status = StatusQueued
+			t.Error = ""
+			t.Phase = ""
+			delete(a.retryAttempts, t.ID)
 		}
 	}
+	engine, engineErr := findYTDLP()
+	launches := a.fillSlotsLocked(engine, engineErr)
+	_ = a.saveLocked()
+	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
-	if nextID != 0 {
-		a.StartTask(nextID)
-	}
-	return a.Snapshot()
+	a.dispatch(launches)
+	a.emit(snapshot)
+	return snapshot
 }
 
+// PauseTask 暂停单个任务;若有排队任务,空出的并发位会自动补上。
 func (a *App) PauseTask(id int) Snapshot {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	for i := range a.store.Tasks {
 		t := &a.store.Tasks[i]
 		if t.ID == id && t.Status == StatusRunning {
-			a.autoRun = false
 			t.Status = StatusPaused
+			t.Phase = ""
 			if cancel := a.workers[id]; cancel != nil {
 				cancel()
+				delete(a.workers, id)
 			}
 			break
 		}
 	}
+	engine, engineErr := findYTDLP()
+	launches := a.fillSlotsLocked(engine, engineErr)
 	_ = a.saveLocked()
-	return a.snapshotLocked()
+	snapshot := a.snapshotLocked()
+	a.mu.Unlock()
+	a.dispatch(launches)
+	a.emit(snapshot)
+	return snapshot
 }
 
+// PauseAllTasks 暂停所有正在下载的任务并停止自动调度。
 func (a *App) PauseAllTasks() Snapshot {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -602,8 +737,10 @@ func (a *App) PauseAllTasks() Snapshot {
 		t := &a.store.Tasks[i]
 		if t.Status == StatusRunning {
 			t.Status = StatusPaused
+			t.Phase = ""
 			if cancel := a.workers[t.ID]; cancel != nil {
 				cancel()
+				delete(a.workers, t.ID)
 			}
 		}
 	}
@@ -611,16 +748,82 @@ func (a *App) PauseAllTasks() Snapshot {
 	return a.snapshotLocked()
 }
 
+// scheduleRetry 在延迟后重新拉起一个"等待重试"的任务。
+func (a *App) scheduleRetry(id int, delay time.Duration) {
+	time.AfterFunc(delay, func() {
+		a.mu.Lock()
+		var launches []launchSpec
+		engine, engineErr := findYTDLP()
+		if a.ctx != nil {
+			for i := range a.store.Tasks {
+				t := &a.store.Tasks[i]
+				if t.ID != id {
+					continue
+				}
+				if t.Status != StatusQueued || !strings.HasPrefix(t.Phase, "重试中") {
+					break
+				}
+				if engineErr != nil {
+					t.Status = StatusFailed
+					t.Phase = ""
+					t.Error = engineErr.Error()
+					break
+				}
+				if len(a.workers) < a.maxConcurrentLocked() {
+					ctx, cancel := context.WithCancel(a.ctx)
+					a.workers[id] = cancel
+					t.Status = StatusRunning
+					t.Phase = ""
+					launches = append(launches, launchSpec{id: id, task: *t, ctx: ctx, engine: engine})
+				} else {
+					// 还没有空位:转回普通排队,由调度器接上
+					t.Phase = ""
+					a.autoRun = true
+				}
+				break
+			}
+		}
+		launches = append(launches, a.fillSlotsLocked(engine, engineErr)...)
+		_ = a.saveLocked()
+		snapshot := a.snapshotLocked()
+		a.mu.Unlock()
+		a.dispatch(launches)
+			a.emit(snapshot)
+	})
+}
+
 func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	settings := a.GetSettings()
 	ffmpegPath, ffmpegErr := a.findFFmpeg()
-	args := []string{"--newline", "--progress", "--progress-template", "download:__DTPROGRESS__%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s", "--no-warnings", "-o", filepath.Join(settings.DownloadDir, "%(title)s.%(ext)s")}
+	args := []string{
+		"--newline", "--progress",
+		"--progress-template", "download:__DTPROGRESS__%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(info.vcodec)s|%(info.acodec)s",
+		"--no-warnings",
+		// 断点续传与网络层重试:文件保留 .part,中断后可续下;分片与文件访问错误也自动重试
+		"--continue",
+		"--retries", "10",
+		"--fragment-retries", "10",
+		"--file-access-retries", "5",
+		"-o", filepath.Join(settings.DownloadDir, "%(title)s.%(ext)s"),
+	}
 	maxHeight := 0
 	if settings.Quality != "最佳可用" && settings.Quality != "" {
 		_, _ = fmt.Sscanf(strings.TrimSuffix(settings.Quality, "p"), "%d", &maxHeight)
 	}
 	if settings.HighFrameRate {
-		args = append(args, "-S", "fps")
+		// 帧率优先,其次是兼容性最好的 H.264 + AAC(mp4)组合
+		args = append(args, "-S", "fps,codec:avc:m4a")
+	} else {
+		// 输出偏好:H.264 + AAC(mp4),播放兼容性最好;
+		// 高画质档位没有对应编码时(如 4K 的 AV1/VP9)自动回退,不影响清晰度选择
+		args = append(args, "-S", "codec:avc:m4a")
+	}
+	audioOnly := strings.HasPrefix(settings.DownloadType, "仅音频")
+	// H.265 需要在下载完成后重新编码;音频模式无需转码
+	hevcRecode := settings.VideoCodec == "hevc" && !audioOnly
+	if hevcRecode && ffmpegErr != nil {
+		a.finishTask(id, errors.New("H.265 转码需要 FFmpeg，请先安装 FFmpeg 或导入安装包"))
+		return
 	}
 	if settings.DownloadType == "仅视频" {
 		format := "bv*/b"
@@ -628,12 +831,16 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 			format = fmt.Sprintf("bv*[height<=%d]/b[height<=%d]", maxHeight, maxHeight)
 		}
 		args = append(args, "-f", format)
-	} else if settings.DownloadType == "仅音频 · MP3" {
+	} else if audioOnly {
 		if ffmpegErr != nil {
-			a.finishTask(id, errors.New("MP3 转换需要 FFmpeg。请安装 FFmpeg 并将其加入系统 PATH"))
+			a.finishTask(id, errors.New("音频格式转换需要 FFmpeg，请先安装 FFmpeg 或导入安装包"))
 			return
 		}
-		args = append(args, "-x", "--audio-format", "mp3")
+		audioFormat := "mp3"
+		if strings.Contains(settings.DownloadType, "FLAC") {
+			audioFormat = "flac"
+		}
+		args = append(args, "-x", "--audio-format", audioFormat, "--audio-quality", "0")
 	} else if ffmpegErr != nil {
 		format := "b"
 		if maxHeight > 0 {
@@ -648,6 +855,9 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		args = append(args, "--ffmpeg-location", ffmpegPath)
 	}
 	args = append(args, "--print", "before_dl:__DOWNTUBE_TITLE__%(title)j")
+	args = append(args, "--print", "before_dl:__DTFMT__%(format_id)s")
+	args = append(args, "--print", "after_move:__DTPATH__%(filepath)j")
+	args = append(args, "--print", "after_move:__DTDUR__%(duration)s")
 	args = append(args, task.URL)
 	if err := os.MkdirAll(settings.DownloadDir, 0o755); err != nil {
 		a.finishTask(id, fmt.Errorf("创建保存目录失败：%w", err))
@@ -672,9 +882,19 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		return
 	}
 	stderrText := make(chan string, 1)
-	go func() { b, _ := io.ReadAll(io.LimitReader(stderr, 1<<20)); stderrText <- strings.TrimSpace(string(b)) }()
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(stderr, 1<<20))
+		stderrText <- strings.TrimSpace(decodeOutput(b))
+	}()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	// 下载阶段跟踪:预期流数来自格式选择结果("396+251" 表示视频+音频两条流),
+	// 逐流更新"下载视频中 / 下载音频中 / 合并中"等提示。
+	expectedStreams := 1
+	streamsSeen := 0
+	lastFingerprint := ""
+	finalPath := ""
+	var finalDuration float64
 	for scanner.Scan() {
 		line := scanner.Text()
 		if strings.HasPrefix(line, "__DOWNTUBE_TITLE__") {
@@ -683,8 +903,61 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 			if json.Unmarshal([]byte(raw), &title) == nil {
 				a.updateTitle(id, title)
 			}
+		} else if strings.HasPrefix(line, "__DTFMT__") {
+			spec := strings.TrimSpace(strings.TrimPrefix(line, "__DTFMT__"))
+			expectedStreams = strings.Count(spec, "+") + 1
+		} else if strings.HasPrefix(line, "__DTPATH__") {
+			raw := strings.TrimPrefix(line, "__DTPATH__")
+			var p string
+			if json.Unmarshal([]byte(raw), &p) == nil {
+				finalPath = p
+			}
+		} else if strings.HasPrefix(line, "__DTDUR__") {
+			raw := strings.TrimSpace(strings.TrimPrefix(line, "__DTDUR__"))
+			var d float64
+			if _, scanErr := fmt.Sscanf(raw, "%f", &d); scanErr == nil {
+				finalDuration = d
+			}
 		} else if strings.HasPrefix(line, "__DTPROGRESS__") {
-			a.updateProgress(id, strings.TrimPrefix(line, "__DTPROGRESS__"))
+			payload := strings.TrimPrefix(line, "__DTPROGRESS__")
+			parts := strings.Split(payload, "|")
+			if len(parts) == 0 {
+				continue
+			}
+			value := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(parts[0]), "%"))
+			var percent int
+			_, _ = fmt.Sscanf(value, "%d", &percent)
+			if percent < 0 {
+				percent = 0
+			}
+			if percent > 100 {
+				percent = 100
+			}
+			vcodec, acodec := "", ""
+			if len(parts) >= 5 {
+				vcodec = strings.TrimSpace(parts[3])
+				acodec = strings.TrimSpace(parts[4])
+			}
+			if streamKind(vcodec, acodec) != "" {
+				if fp := vcodec + "|" + acodec; fp != lastFingerprint {
+					lastFingerprint = fp
+					streamsSeen++
+				}
+			}
+			phase := progressPhase(percent, streamsSeen, expectedStreams, vcodec, acodec, settings.DownloadType)
+			// 多流下载时把整体进度折算到 0-100,避免"视频 100% 后又回到 0%"的观感
+			overall := percent
+			if expectedStreams > 1 {
+				completed := streamsSeen - 1
+				if completed > expectedStreams-1 {
+					completed = expectedStreams - 1
+				}
+				if completed < 0 {
+					completed = 0
+				}
+				overall = (completed*100 + percent) / expectedStreams
+			}
+			a.updateProgress(id, overall, phase)
 		}
 	}
 	err = cmd.Wait()
@@ -692,24 +965,250 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	if ctx.Err() != nil {
 		a.mu.Lock()
 		delete(a.workers, id)
-		nextID := a.nextRunnableLocked()
+		eng, engErr := findYTDLP()
+		launches := a.fillSlotsLocked(eng, engErr)
 		_ = a.saveLocked()
+		snapshot := a.snapshotLocked()
 		a.mu.Unlock()
-		if nextID != 0 {
-			a.StartTask(nextID)
-		}
+		a.dispatch(launches)
+			a.emit(snapshot)
 		return
 	}
-	if err != nil && detail != "" {
-		if ffmpegErr != nil && strings.Contains(detail, "Requested format is not available") {
-			detail += "（该视频只提供分离的音视频流，需要安装 FFmpeg 才能下载；当前系统未检测到 FFmpeg）"
+	if err == nil && hevcRecode {
+		if terr := a.transcodeToHEVC(ctx, id, finalPath, finalDuration, ffmpegPath); terr != nil {
+			// 转码失败:原视频已保留,不再进入自动重试(重试会重复下载)
+			a.finishTaskEx(id, fmt.Errorf("下载已完成，但 H.265 转码失败：%v（原视频已保留）", terr), false)
+			return
 		}
-		if strings.Contains(detail, "Could not copy Chrome cookie database") {
-			detail += "（浏览器运行时会锁定 Cookies 数据库，请先完全退出 Edge / Chrome 再重试，或关闭「使用浏览器 Cookies」）"
+	}
+	if err != nil && detail != "" {
+		detail = extractErrorLines(detail)
+		if hint := transcriptHints(detail, settings, ffmpegErr != nil); hint != "" {
+			detail += hint
 		}
 		err = fmt.Errorf("%w: %s", err, detail)
 	}
 	a.finishTask(id, err)
+}
+
+// transcodeToHEVC 用 ffmpeg 把下载好的视频重新编码为 H.265(HEVC),
+// 过程中上报"转码 H.265 中"进度;成功后替换原文件,输出统一为 .mp4。
+func (a *App) transcodeToHEVC(ctx context.Context, id int, srcPath string, duration float64, ffmpegPath string) error {
+	if srcPath == "" {
+		return errors.New("未获取到下载文件路径")
+	}
+	if _, err := os.Stat(srcPath); err != nil {
+		return fmt.Errorf("找不到下载文件：%v", err)
+	}
+	outPath := strings.TrimSuffix(srcPath, filepath.Ext(srcPath)) + ".mp4"
+	tmpPath := strings.TrimSuffix(outPath, filepath.Ext(outPath)) + ".hevc-tmp.mp4"
+	defer os.Remove(tmpPath)
+
+	a.updateProgress(id, 0, "转码 H.265 中")
+	cmd := exec.CommandContext(ctx, ffmpegPath,
+		"-y", "-hide_banner", "-loglevel", "error",
+		"-progress", "pipe:1", "-nostats",
+		"-i", srcPath,
+		"-c:v", "libx265", "-preset", "medium", "-crf", "26",
+		"-tag:v", "hvc1", "-movflags", "+faststart",
+		"-c:a", "copy",
+		tmpPath,
+	)
+	hideConsoleWindow(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 4096), 1<<20)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "out_time_us=") {
+			continue
+		}
+		var us int64
+		if _, scanErr := fmt.Sscanf(strings.TrimPrefix(line, "out_time_us="), "%d", &us); scanErr != nil {
+			continue
+		}
+		if duration <= 0 {
+			continue
+		}
+		percent := int(float64(us) / 1e6 / duration * 100)
+		if percent > 99 {
+			percent = 99
+		}
+		if percent < 0 {
+			percent = 0
+		}
+		a.updateProgress(id, percent, "转码 H.265 中")
+	}
+	if err := cmd.Wait(); err != nil {
+		msg := strings.TrimSpace(decodeOutput(stderrBuf.Bytes()))
+		if len(msg) > 300 {
+			msg = msg[:300] + "…"
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		return errors.New(msg)
+	}
+	// 用"挪走-替换-清理"三步完成替换,中途失败时可回滚,不会丢失原文件
+	backup := outPath + ".hevc-bak"
+	_ = os.Remove(backup)
+	if _, statErr := os.Stat(outPath); statErr == nil {
+		if err := os.Rename(outPath, backup); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(tmpPath, outPath); err != nil {
+		_ = os.Rename(backup, outPath) // 回滚
+		return err
+	}
+	_ = os.Remove(backup)
+	if srcPath != outPath {
+		_ = os.Remove(srcPath)
+	}
+	return nil
+}
+
+// decodeOutput 把 yt-dlp 的输出解码为 UTF-8:Windows 下 Python 的错误信息常为 GBK 编码。
+func decodeOutput(raw []byte) string {
+	if utf8.Valid(raw) {
+		return string(raw)
+	}
+	if decoded, err := simplifiedchinese.GBK.NewDecoder().Bytes(raw); err == nil {
+		return string(decoded)
+	}
+	return string(raw)
+}
+
+// streamKind 依据编解码信息判断当前进度属于哪一类流。
+func streamKind(vcodec, acodec string) string {
+	hasV := vcodec != "" && vcodec != "none" && vcodec != "NA"
+	hasA := acodec != "" && acodec != "none" && acodec != "NA"
+	switch {
+	case hasV && hasA:
+		return "av"
+	case hasV:
+		return "video"
+	case hasA:
+		return "audio"
+	default:
+		return ""
+	}
+}
+
+// progressPhase 依据流进度推导正在进行的阶段文案。
+func progressPhase(percent, streamsSeen, expectedStreams int, vcodec, acodec, downloadType string) string {
+	if percent >= 100 && expectedStreams > 1 && streamsSeen >= expectedStreams {
+		return "合并中"
+	}
+	if percent >= 100 && strings.HasPrefix(downloadType, "仅音频") {
+		return "转换音频中"
+	}
+	switch streamKind(vcodec, acodec) {
+	case "video":
+		return "下载视频中"
+	case "audio":
+		return "下载音频中"
+	case "av":
+		return "下载中"
+	}
+	return ""
+}
+
+// extractErrorLines 从 yt-dlp 的 stderr 里挑出 ERROR 行,避免把整段输出塞进界面。
+func extractErrorLines(raw string) string {
+	lines := strings.Split(raw, "\n")
+	var picked []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "ERROR:") {
+			if len(l) > 600 {
+				l = l[:600] + "…"
+			}
+			picked = append(picked, l)
+			if len(picked) >= 3 {
+				break
+			}
+		}
+	}
+	if len(picked) == 0 {
+		if len(raw) > 800 {
+			raw = raw[:800] + "…"
+		}
+		return strings.TrimSpace(raw)
+	}
+	return strings.Join(picked, "\n")
+}
+
+// transcriptHints 针对常见失败原因追加可操作的排查建议.
+func transcriptHints(detail string, settings Settings, ffmpegMissing bool) string {
+	var hints []string
+	add := func(s string) {
+		for _, h := range hints {
+			if h == s {
+				return
+			}
+		}
+		hints = append(hints, s)
+	}
+	has := func(sub string) bool { return strings.Contains(detail, sub) }
+
+	if ffmpegMissing && has("Requested format is not available") {
+		add("该视频只提供分离的音视频流，需要安装 FFmpeg 才能下载")
+	}
+	if has("Could not copy Chrome cookie database") {
+		add("浏览器运行时会锁定 Cookies 数据库，请先完全退出浏览器再重试，或改用文件导入 Cookies")
+	}
+	if has("Sign in to confirm") || has("not a bot") || has("Sign in required") {
+		add("YouTube 要求登录验证，请在设置 → Cookies 中提供有效 Cookies")
+	}
+	if has("HTTP Error 403") {
+		add("请求被拒绝(403)，通常是 Cookies 失效或当前代理 IP 被限制，尝试更新 Cookies 或更换代理节点")
+	}
+	if has("HTTP Error 429") {
+		add("请求过于频繁(429)，请稍后重试或降低并发下载数")
+	}
+	if settings.UseBrowserCookie && settings.CookieSource == "file" && (has("HTTP Error 403") || has("Sign in to confirm") || has("not a bot")) {
+		add("当前使用的是本地 Cookies 文件，若持续失败可重新导出，或改用「从浏览器读取」方式")
+	}
+	if has("does not look like a Netscape format") || has("cookies file uses an unsupported format") || has("unsupported file format") {
+		add("Cookies 文件格式不正确，需要 Netscape 格式的 cookies.txt(用浏览器扩展导出，而不是 JSON)")
+	}
+	if has("Unable to open cookie file") || has("unable to read cookie file") || (has("cookie") && has("No such file")) {
+		add("Cookies 文件不存在或无法读取，请在设置中重新选择")
+	}
+	if has("Video unavailable") {
+		add("视频不可用，可能已被删除或设为私享")
+	}
+	if has("members-only") || has("available to this channel's members") {
+		add("会员专属内容，需要对应账号的 Cookies")
+	}
+	if has("Private video") {
+		add("这是私享视频，需要拥有访问权限的账号 Cookies")
+	}
+	if has("unable to download video data") || has("Unable to download webpage") {
+		add("与 YouTube 的连接中断，网络或代理不稳定；任务已开启自动重试")
+	}
+	if has("nsig") || has("Signature extraction failed") || has("Some formats may be missing") {
+		add("YouTube 客户端校验异常，请更新 yt-dlp 或提供 Cookies")
+	}
+	if has("Connection reset") || has("timed out") || has("Temporary failure") || has("EOF occurred") {
+		add("网络连接被中断，请检查代理稳定性；任务已开启自动重试")
+	}
+	if has("This video is not available in your country") {
+		add("当前地区不可观看，请更换代理节点")
+	}
+	if len(hints) == 0 {
+		return ""
+	}
+	return "(" + strings.Join(hints, ";") + ")"
 }
 
 func (a *App) updateTitle(id int, title string) {
@@ -726,48 +1225,47 @@ func (a *App) updateTitle(id int, title string) {
 	}
 	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "state:updated", snapshot)
-	}
+	a.emit(snapshot)
 }
 
-func (a *App) updateProgress(id int, line string) {
-	parts := strings.Split(line, "|")
-	if len(parts) == 0 {
-		return
-	}
-	value := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(parts[0]), "%"))
-	var progress int
-	_, _ = fmt.Sscanf(value, "%d", &progress)
-	if progress < 0 {
-		progress = 0
-	}
-	if progress > 100 {
-		progress = 100
-	}
+func (a *App) updateProgress(id int, progress int, phase string) {
 	a.mu.Lock()
 	changed := false
 	for i := range a.store.Tasks {
-		if a.store.Tasks[i].ID == id {
-			if a.store.Tasks[i].Progress != progress {
-				a.store.Tasks[i].Progress = progress
-				changed = true
-			}
-			break
+		t := &a.store.Tasks[i]
+		if t.ID != id {
+			continue
 		}
+		if t.Progress != progress {
+			t.Progress = progress
+			changed = true
+		}
+		if phase != "" && t.Phase != phase {
+			t.Phase = phase
+			changed = true
+		}
+		break
 	}
 	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
-	if changed && a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "state:updated", snapshot)
+	if changed {
+		a.emit(snapshot)
 	}
 }
 
 func (a *App) finishTask(id int, err error) {
+	a.finishTaskEx(id, err, true)
+}
+
+// finishTaskEx 结束任务;allowRetry 为 false 时不进入自动重试
+// (如转码失败:原文件已保留,重试会重复下载)。
+func (a *App) finishTaskEx(id int, err error, allowRetry bool) {
 	a.mu.Lock()
 	delete(a.workers, id)
 	openFolder := false
 	downloadDir := a.store.Settings.DownloadDir
+	retryID := 0
+	var retryDelay time.Duration
 	for i := range a.store.Tasks {
 		t := &a.store.Tasks[i]
 		if t.ID != id {
@@ -776,27 +1274,64 @@ func (a *App) finishTask(id int, err error) {
 		if err == nil {
 			t.Status = StatusComplete
 			t.Progress = 100
+			t.Phase = ""
 			t.Error = ""
+			delete(a.retryAttempts, id)
 			openFolder = a.store.Settings.OpenOnComplete
 		} else {
-			t.Status = StatusFailed
-			t.Error = err.Error()
+			maxRetry := a.store.Settings.AutoRetry
+			if !allowRetry {
+				maxRetry = 0
+			}
+			if maxRetry < 0 {
+				maxRetry = 0
+			}
+			attempts := a.retryAttempts[id]
+			if attempts < maxRetry {
+				// 保留在队列里,延迟后自动重试(退避:8s、18s、28s…)
+				a.retryAttempts[id] = attempts + 1
+				t.Status = StatusQueued
+				t.Progress = 0
+				t.Phase = fmt.Sprintf("重试中(%d/%d)", attempts+1, maxRetry)
+				t.Error = err.Error()
+				retryID = id
+				retryDelay = time.Duration(8+attempts*10) * time.Second
+			} else {
+				t.Status = StatusFailed
+				t.Phase = ""
+				t.Error = err.Error()
+				delete(a.retryAttempts, id)
+			}
 		}
 		break
 	}
-	nextID := a.nextRunnableLocked()
+	// 没有正在运行或等待中的任务时,自动调度收尾
+	if a.autoRun && len(a.workers) == 0 && !a.hasRunnableLocked() {
+		a.autoRun = false
+	}
+	engine, engineErr := findYTDLP()
+	launches := a.fillSlotsLocked(engine, engineErr)
 	_ = a.saveLocked()
 	snapshot := a.snapshotLocked()
 	a.mu.Unlock()
 	if openFolder {
 		_ = exec.Command("explorer.exe", downloadDir).Start()
 	}
-	if nextID != 0 {
-		a.StartTask(nextID)
+	if retryID != 0 {
+		a.scheduleRetry(retryID, retryDelay)
 	}
-	if a.ctx != nil {
-		runtime.EventsEmit(a.ctx, "state:updated", snapshot)
+	a.dispatch(launches)
+	a.emit(snapshot)
+}
+
+// hasRunnableLocked 判断是否还有等待调度的任务(含"等待重试")。调用方须持有锁。
+func (a *App) hasRunnableLocked() bool {
+	for _, t := range a.store.Tasks {
+		if t.Status == StatusQueued {
+			return true
+		}
 	}
+	return false
 }
 
 func (a *App) SaveSettings(settings Settings) Snapshot {
@@ -817,6 +1352,21 @@ func (a *App) SaveSettings(settings Settings) Snapshot {
 	if settings.CookieSource == "" {
 		settings.CookieSource = "browser"
 	}
+	if settings.MaxConcurrent <= 0 {
+		settings.MaxConcurrent = 3
+	}
+	if settings.MaxConcurrent > 6 {
+		settings.MaxConcurrent = 6
+	}
+	if settings.AutoRetry < 0 {
+		settings.AutoRetry = 0
+	}
+	if settings.AutoRetry > 5 {
+		settings.AutoRetry = 5
+	}
+	if settings.VideoCodec != "hevc" {
+		settings.VideoCodec = "auto"
+	}
 	a.store.Settings = settings
 	_ = a.saveLocked()
 	return a.snapshotLocked()
@@ -831,7 +1381,8 @@ func (a *App) SelectFolder() string {
 	return filepath.Clean(dir)
 }
 
-func (a *App) SelectCookieFile() string {
+// SelectCookieFile 让用户选择 cookies.txt,并做格式校验与自动修复。
+func (a *App) SelectCookieFile() map[string]any {
 	current := a.GetSettings().CookieFile
 	defaultDir := ""
 	if current != "" {
@@ -846,9 +1397,77 @@ func (a *App) SelectCookieFile() string {
 		},
 	})
 	if err != nil || chosen == "" {
-		return ""
+		return map[string]any{"canceled": true}
 	}
-	return filepath.Clean(chosen)
+	chosen = filepath.Clean(chosen)
+	note, verifyErr := repairCookieFile(chosen)
+	if verifyErr != nil {
+		return map[string]any{"ok": false, "message": verifyErr.Error()}
+	}
+	return map[string]any{"ok": true, "path": chosen, "note": note}
+}
+
+// repairCookieFile 校验 cookies 文件,并自动修复两个高频问题:
+// UTF-8 BOM 和缺失的 Netscape 文件头(两者都会让 yt-dlp 直接报格式错误)。
+func repairCookieFile(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("读取文件失败：%v", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("文件是空的，请重新导出 cookies")
+	}
+	if len(data) > 8<<20 {
+		return "", errors.New("文件过大，不像是 cookies.txt")
+	}
+	var notes []string
+	changed := false
+	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+		data = data[3:]
+		changed = true
+		notes = append(notes, "已移除文件开头的 BOM")
+	}
+	text := string(data)
+	firstLine := text
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		firstLine = text[:i]
+	}
+	firstLine = strings.TrimSpace(firstLine)
+	hasHeader := strings.HasPrefix(firstLine, "# Netscape HTTP Cookie File") || strings.HasPrefix(firstLine, "# HTTP Cookie File")
+	if !hasHeader {
+		if !looksLikeCookieLines(text) {
+			return "", errors.New("文件不像 Netscape 格式的 cookies.txt，请用浏览器扩展重新导出(不要选 JSON 格式)")
+		}
+		data = append([]byte("# Netscape HTTP Cookie File\n"), data...)
+		changed = true
+		notes = append(notes, "已补全 Netscape 文件头")
+	}
+	if !strings.Contains(string(data), "youtube.com") {
+		notes = append(notes, "里面没有 youtube.com 的 cookies，可能无法用于登录验证")
+	}
+	if changed {
+		if err := os.WriteFile(filePath, data, 0o600); err != nil {
+			return "", fmt.Errorf("修复后写回文件失败：%v", err)
+		}
+	}
+	return strings.Join(notes, ";"), nil
+}
+
+// looksLikeCookieLines 粗判文本是否包含 Netscape cookie 数据行。
+func looksLikeCookieLines(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "#HttpOnly_") {
+			continue
+		}
+		if strings.Count(line, "\t") >= 5 {
+			return true
+		}
+	}
+	return false
 }
 
 // SelectFFmpegFile 让用户指定已下载的 ffmpeg.exe，校验后保存。
@@ -1269,6 +1888,16 @@ func (a *App) load() {
 	if saved.Settings.Quality == "" {
 		saved.Settings = defaultSettings()
 	}
+	if saved.Version < 2 {
+		// v1 → v2:补充并发下载与失败重试设置
+		if saved.Settings.MaxConcurrent <= 0 {
+			saved.Settings.MaxConcurrent = 3
+		}
+		if saved.Settings.AutoRetry <= 0 {
+			saved.Settings.AutoRetry = 2
+		}
+		saved.Version = 2
+	}
 	if saved.Tasks == nil {
 		saved.Tasks = []Task{}
 	}
@@ -1276,6 +1905,8 @@ func (a *App) load() {
 		if saved.Tasks[i].Status == StatusRunning {
 			saved.Tasks[i].Status = StatusQueued
 		}
+		// 阶段与重试提示是运行期的瞬时状态,重启后不再展示
+		saved.Tasks[i].Phase = ""
 	}
 	a.store = saved
 }
