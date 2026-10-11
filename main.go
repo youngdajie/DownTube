@@ -383,7 +383,7 @@ func findYTDLP() (string, error) {
 	if path, err := exec.LookPath("yt-dlp.exe"); err == nil {
 		return path, nil
 	}
-	return "", errors.New("未找到 yt-dlp。请将 yt-dlp.exe 放在程序目录或加入 PATH。")
+	return "", errors.New("未找到 yt-dlp。请将 yt-dlp.exe 放在程序目录或加入 PATH")
 }
 
 func errorText(err error) string {
@@ -630,7 +630,7 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		args = append(args, "-f", format)
 	} else if settings.DownloadType == "仅音频 · MP3" {
 		if ffmpegErr != nil {
-			a.finishTask(id, errors.New("MP3 转换需要 FFmpeg。请安装 FFmpeg 并将其加入系统 PATH。"))
+			a.finishTask(id, errors.New("MP3 转换需要 FFmpeg。请安装 FFmpeg 并将其加入系统 PATH"))
 			return
 		}
 		args = append(args, "-x", "--audio-format", "mp3")
@@ -906,7 +906,7 @@ func (a *App) InstallFFmpeg() map[string]any {
 	a.mu.Lock()
 	if a.ffmpegInstalling {
 		a.mu.Unlock()
-		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中,请稍候"}
+		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中，请稍候"}
 	}
 	a.ffmpegInstalling = true
 	useProxy, proxyURL := a.store.Settings.UseProxy, a.store.Settings.ProxyURL
@@ -922,7 +922,7 @@ func (a *App) InstallFFmpeg() map[string]any {
 		return map[string]any{"ok": false, "message": err.Error()}
 	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return map[string]any{"ok": false, "message": "创建安装目录失败:" + err.Error()}
+		return map[string]any{"ok": false, "message": "创建安装目录失败：" + err.Error()}
 	}
 
 	tmpZip := filepath.Join(os.TempDir(), "downtube-ffmpeg.zip")
@@ -942,18 +942,18 @@ func (a *App) InstallFFmpeg() map[string]any {
 		}
 	}
 	if downloadErr != nil {
-		return map[string]any{"ok": false, "message": "下载失败:" + downloadErr.Error() + "。如果网络受限,请在设置中开启代理后重试。"}
+		return map[string]any{"ok": false, "message": "下载失败：" + downloadErr.Error() + "。如果网络受限，请在设置中开启代理后重试"}
 	}
 
 	a.emitFFmpegProgress("extract", 0, 0, "正在解压安装(约需十余秒)…")
 	if err := extractFFmpegArchive(tmpZip, binDir, nil); err != nil {
-		return map[string]any{"ok": false, "message": "解压失败:" + err.Error()}
+		return map[string]any{"ok": false, "message": "解压失败：" + err.Error()}
 	}
 
 	ffmpegPath := filepath.Join(binDir, "ffmpeg.exe")
 	version, verr := ffmpegVersion(ffmpegPath)
 	if verr != nil {
-		return map[string]any{"ok": false, "message": "安装校验未通过:" + verr.Error()}
+		return map[string]any{"ok": false, "message": "安装校验未通过：" + verr.Error()}
 	}
 
 	a.mu.Lock()
@@ -971,7 +971,7 @@ func (a *App) ImportFFmpegArchive() map[string]any {
 	a.mu.Lock()
 	if a.ffmpegInstalling {
 		a.mu.Unlock()
-		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中,请稍候"}
+		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中，请稍候"}
 	}
 	a.ffmpegInstalling = true
 	a.mu.Unlock()
@@ -1008,13 +1008,13 @@ func (a *App) ImportFFmpegArchive() map[string]any {
 		a.emitFFmpegProgress("extract", 0, 0, fmt.Sprintf("正在解压(已写出 %.0f MB)…", float64(received)/1048576))
 	}
 	if err := extractFFmpegArchive(chosen, binDir, progress); err != nil {
-		return map[string]any{"ok": false, "message": "解压失败:" + err.Error()}
+		return map[string]any{"ok": false, "message": "解压失败：" + err.Error()}
 	}
 
 	ffmpegPath := filepath.Join(binDir, "ffmpeg.exe")
 	version, verr := ffmpegVersion(ffmpegPath)
 	if verr != nil {
-		return map[string]any{"ok": false, "message": "安装校验未通过:" + verr.Error()}
+		return map[string]any{"ok": false, "message": "安装校验未通过：" + verr.Error()}
 	}
 
 	a.mu.Lock()
@@ -1095,7 +1095,7 @@ func extractFFmpegArchive(archivePath, destBinDir string, onProgress func(int64)
 	case ".zip":
 		return extractZip(archivePath, destBinDir, onProgress)
 	default:
-		return errors.New("不支持的压缩格式,请选择 .7z 或 .zip 安装包")
+		return errors.New("不支持的压缩格式，请选择 .7z 或 .zip 安装包")
 	}
 }
 
@@ -1182,7 +1182,7 @@ func extractZip(zipPath, destBinDir string, onProgress func(int64)) error {
 func extractSevenZip(archivePath, destBinDir string, onProgress func(int64)) error {
 	r, err := sevenzip.OpenReader(archivePath)
 	if err != nil {
-		return fmt.Errorf("无法读取 7z 压缩包:%w", err)
+		return fmt.Errorf("无法读取 7z 压缩包：%w", err)
 	}
 	defer r.Close()
 	extracted := 0

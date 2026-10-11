@@ -74,11 +74,11 @@ const FFMPEG_MIRRORS = [
 ]
 
 const SETTINGS_SECTIONS = [
-  { id: 'location', icon: 'folder', title: '下载位置', sub: '保存目录与完成后行为', desc: '视频文件保存到哪里,以及下载完成后要做什么' },
+  { id: 'location', icon: 'folder', title: '下载位置', sub: '保存目录与完成后行为', desc: '视频文件保存到哪里，以及下载完成后要做什么' },
   { id: 'format', icon: 'sliders', title: '画质与格式', sub: '默认清晰度与内容类型', desc: '默认下载的视频清晰度、内容类型与帧率偏好' },
-  { id: 'network', icon: 'globe', title: '网络与代理', sub: '代理连接与连通性检测', desc: '通过代理连接 YouTube,并在启动时检测可用性' },
-  { id: 'cookies', icon: 'key', title: 'Cookies', sub: '浏览器验证与文件导入', desc: '下载需要登录或年龄验证的视频时,提供 Cookies' },
-  { id: 'engine', icon: 'cpu', title: '下载引擎', sub: 'yt-dlp、FFmpeg 与程序数据', desc: '下载所依赖的本地组件,以及程序数据的存放位置' },
+  { id: 'network', icon: 'globe', title: '网络与代理', sub: '代理连接与连通性检测', desc: '通过代理连接 YouTube，并在启动时检测可用性' },
+  { id: 'cookies', icon: 'key', title: 'Cookies', sub: '浏览器验证与文件导入', desc: '下载需要登录或年龄验证的视频时，提供 Cookies' },
+  { id: 'engine', icon: 'cpu', title: '下载引擎', sub: 'yt-dlp、FFmpeg 与程序数据', desc: '下载所依赖的本地组件，以及程序数据的存放位置' },
 ]
 
 const STATUS_CLASS = { 等待中: 'waiting', 准备中: 'running', 已暂停: 'paused', 已完成: 'done', 失败: 'failed' }
@@ -186,7 +186,7 @@ async function refreshSnapshot() {
     // 打开时如果已有任务在下载,直接进入队列视图
     if (state.tasks.some(t => t.status === '准备中')) state.queueStep = 'list'
     render()
-  } catch (error) { console.error(error); toast(`读取本地数据失败:${error.message}`) }
+  } catch (error) { console.error(error); toast(`读取本地数据失败：${error.message}`) }
 }
 
 // ============================================================
@@ -266,9 +266,9 @@ function renderDownloads() {
   const total = taskCount()
   const running = state.tasks.filter(t => t.status === '准备中').length
   const banner = !state.engineReady
-    ? `<div class="notice-bar warn"><span class="notice-icon">${icon('download', 18)}</span><div class="notice-copy"><b>下载引擎未配置</b><small>${safe(state.engineError || '请将 yt-dlp.exe 放到程序目录,或加入系统 PATH。')}</small></div><button class="btn btn-ghost btn-sm" id="engineSetupBanner">获取 yt-dlp</button></div>`
+    ? `<div class="notice-bar warn"><span class="notice-icon">${icon('download', 18)}</span><div class="notice-copy"><b>下载引擎未配置</b><small>${safe(state.engineError || '请将 yt-dlp.exe 放到程序目录，或加入系统 PATH')}</small></div><button class="btn btn-ghost btn-sm" id="engineSetupBanner">获取 yt-dlp</button></div>`
     : !state.ffmpegReady
-      ? `<div class="notice-bar info"><span class="notice-icon">${icon('video', 18)}</span><div class="notice-copy"><b>FFmpeg 未安装</b><small>合并高画质音视频与 MP3 转换需要此组件,基础下载不受影响。</small></div><button class="btn btn-ghost btn-sm" id="ffmpegSetup">去安装</button></div>`
+      ? `<div class="notice-bar info"><span class="notice-icon">${icon('video', 18)}</span><div class="notice-copy"><b>FFmpeg 未安装</b><small>合并高画质音视频与 MP3 转换需要此组件，基础下载不受影响</small></div><button class="btn btn-ghost btn-sm" id="ffmpegSetup">去安装</button></div>`
       : ''
   const stepListSmall = total ? `${total} 个任务${running ? ` · ${running} 进行中` : ''}` : '暂无任务'
   return `
@@ -293,13 +293,13 @@ function renderAddView() {
   const single = state.linkMode === 'single'
   return `<div class="parse-view">
     <h1 class="parse-title">解析链接</h1>
-    <p class="parse-desc">${single ? '粘贴一个 YouTube 视频链接,解析后加入下载队列。' : '粘贴一个或多个 YouTube 来源,每行一个,解析后加入下载队列。'}</p>
+    <p class="parse-desc">${single ? '粘贴一个 YouTube 视频链接，解析后加入下载队列' : '粘贴一个或多个 YouTube 来源，每行一个，解析后加入下载队列'}</p>
     <div class="tabs">
       <button class="tab ${single ? '' : 'active'}" data-mode="batch">批量链接</button>
       <button class="tab ${single ? 'active' : ''}" data-mode="single">单个视频</button>
     </div>
     <textarea id="linkInput" class="parse-input ${single ? 'single' : ''}" spellcheck="false" placeholder="${single ? 'https://www.youtube.com/watch?v=…' : 'https://www.youtube.com/watch?v=…&#10;https://youtu.be/…'}">${safe(state.draftLink)}</textarea>
-    <div class="field-hint">每行一个链接;支持视频、短链、播放列表与直播回放。</div>
+    <div class="field-hint">每行一个链接；支持视频、短链、播放列表与直播回放</div>
     <div class="parse-actions">
       <button class="btn btn-ghost" id="pasteLinks">${icon('clipboard', 15)}粘贴链接</button>
       <div class="parse-submit">
@@ -362,10 +362,10 @@ function renderQueueView() {
 
 function renderTable(list) {
   if (!state.tasks.length) {
-    return `<div class="empty"><span class="empty-icon">${icon('video', 22)}</span><b>队列还是空的</b><p>在「添加链接」里粘贴 YouTube 链接,任务会显示在这里。</p></div>`
+    return `<div class="empty"><span class="empty-icon">${icon('video', 22)}</span><b>队列还是空的</b><p>在「添加链接」里粘贴 YouTube 链接，任务会显示在这里</p></div>`
   }
   if (!list.length) {
-    return `<div class="empty"><span class="empty-icon">${icon('search', 22)}</span><b>没有匹配的任务</b><p>试试其他关键词。</p></div>`
+    return `<div class="empty"><span class="empty-icon">${icon('search', 22)}</span><b>没有匹配的任务</b><p>试试其他关键词</p></div>`
   }
   return `<table class="queue-table">
     <colgroup><col class="col-task"><col class="col-status"><col class="col-progress"><col class="col-quality"><col class="col-actions"></colgroup>
@@ -431,7 +431,7 @@ function renderSettingsSection(id) {
   if (id === 'location') {
     return `
       <div class="set-card">
-        <div class="set-card-head"><b>保存位置</b><p>视频将保存到所选文件夹,文件名尽量保留原标题</p></div>
+        <div class="set-card-head"><b>保存位置</b><p>视频将保存到所选文件夹，文件名尽量保留原标题</p></div>
         <div class="set-card-body">
           <label class="field"><span>下载文件夹</span>
             <div class="path-field">
@@ -450,7 +450,7 @@ function renderSettingsSection(id) {
   if (id === 'format') {
     return `
       <div class="set-card">
-        <div class="set-card-head"><b>画质与格式</b><p>新任务默认采用以下设置,可在任务开始前调整</p></div>
+        <div class="set-card-head"><b>画质与格式</b><p>新任务默认采用以下设置，可在任务开始前调整</p></div>
         <div class="set-card-body">
           <div class="form-grid">
             <div class="field"><span>默认视频画质</span>${selectControl('quality', ['2160p · 4K', '1440p', '1080p', '720p', '480p', '最佳可用'], state.quality, '默认视频画质')}</div>
@@ -467,7 +467,7 @@ function renderSettingsSection(id) {
   if (id === 'network') {
     return `
       <div class="set-card">
-        <div class="set-card-head"><b>代理连接</b><p>通过本机代理访问 YouTube,适用于网络受限的环境</p></div>
+        <div class="set-card-head"><b>代理连接</b><p>通过本机代理访问 YouTube，适用于网络受限的环境</p></div>
         <div class="set-card-body">
           <div class="row-split">
             <div class="row-split-copy"><b>使用代理</b><small>下载与解析均通过指定代理连接</small></div>
@@ -502,7 +502,7 @@ function renderSettingsSection(id) {
             </div>
             <div class="${state.cookieSource === 'browser' ? '' : 'hidden'}" id="cookieSourceBrowser">
               <div class="field"><span>读取 Cookies 的浏览器</span>${selectControl('cookieBrowser', ['Chrome', 'Microsoft Edge', 'Firefox', 'Brave'], state.cookieBrowser, '读取 Cookies 的浏览器')}</div>
-              <div class="hint ${state.browserRunning ? 'warn' : ''}" id="browserRunningHint" style="margin-top:10px">${state.browserRunning ? safe(state.cookieBrowser) + ' 正在运行 —— 读取 Cookies 会失败,请彻底退出后再试' : '此方式需完全退出浏览器(含后台进程)后使用'}</div>
+              <div class="hint ${state.browserRunning ? 'warn' : ''}" id="browserRunningHint" style="margin-top:10px">${state.browserRunning ? safe(state.cookieBrowser) + ' 正在运行 —— 读取 Cookies 会失败，请彻底退出后再试' : '此方式需完全退出浏览器(含后台进程)后使用'}</div>
             </div>
             <div class="${state.cookieSource === 'file' ? '' : 'hidden'}" id="cookieSourceFile">
               <div class="path-field">
@@ -524,7 +524,7 @@ function renderSettingsSection(id) {
           <span class="engine-badge ${state.engineReady ? 'ok' : 'warn'}">${icon('download', 18)}</span>
           <div class="engine-copy">
             <b>${state.engineReady ? '已就绪' : '未配置'}</b>
-            <small>${state.engineReady ? 'yt-dlp.exe 已随程序提供,可直接使用' : safe(state.engineError || '将 yt-dlp.exe 放到程序目录,或加入系统 PATH')}</small>
+            <small>${state.engineReady ? 'yt-dlp.exe 已随程序提供，可直接使用' : safe(state.engineError || '将 yt-dlp.exe 放到程序目录，或加入系统 PATH')}</small>
           </div>
           ${state.engineReady ? '' : `<button class="btn btn-ghost btn-sm" id="engineSetupBtn">获取 yt-dlp</button>`}
         </div>
@@ -537,7 +537,7 @@ function renderSettingsSection(id) {
           <span class="engine-badge ${state.ffmpegReady ? 'ok' : 'warn'}">${icon('video', 18)}</span>
           <div class="engine-copy">
             <b>${state.ffmpegReady ? '已就绪' : '未安装'}</b>
-            <small>${state.ffmpegReady ? safe(state.ffmpegVersion || state.ffmpegPath || '已检测到可用组件') : '未安装时,包含独立音频流的高画质视频将无法合并'}</small>
+            <small>${state.ffmpegReady ? safe(state.ffmpegVersion || state.ffmpegPath || '已检测到可用组件') : '未安装时，包含独立音频流的高画质视频将无法合并'}</small>
           </div>
           <button class="btn btn-ghost btn-sm" id="ffmpegManageBtn">${state.ffmpegReady ? '更换' : '去安装'}</button>
         </div>
@@ -604,7 +604,7 @@ function renderAbout() {
         </div>
       </div>
     </div>
-    <p class="about-note">任务与设置仅保存在本机,不会上传或收集任何链接。本工具不提供视频内容,请仅下载你有权保存的内容,并遵守相关网站的服务条款与版权规则。</p>
+    <p class="about-note">任务与设置仅保存在本机，不会上传或收集任何链接。本工具不提供视频内容，请仅下载你有权保存的内容，并遵守相关网站的服务条款与版权规则</p>
   </div>`
 }
 
@@ -615,12 +615,12 @@ function renderFFmpegModal() {
   const indeterminate = state.ffmpegPhase === 'extract' && state.ffmpegProgress < 100
   return `<div class="modal-backdrop" id="ffmpegBackdrop"><div class="modal ffmpeg-modal">
     <div class="modal-head">
-      <div><h2>安装 FFmpeg</h2><p>合并高清音视频与 MP3 转换所需的媒体组件,安装后自动生效</p></div>
+      <div><h2>安装 FFmpeg</h2><p>合并高清音视频与 MP3 转换所需的媒体组件，安装后自动生效</p></div>
       <button class="icon-btn" id="closeFFmpegModal" aria-label="关闭">${icon('x', 16)}</button>
     </div>
     <div class="ff-section">
       <div class="ff-section-title">在线下载</div>
-      <p class="ff-hint">点击「前往下载」会在浏览器中打开镜像链接,下载得到 <b>ffmpeg-9.0.2-essentials_build.7z</b>;完成后回到这里点击「导入安装包」选择该文件,程序会自动解压并配置。</p>
+      <p class="ff-hint">点击「前往下载」会在浏览器中打开镜像链接，下载得到 <b>ffmpeg-9.0.2-essentials_build.7z</b>；完成后回到这里点击「导入安装包」选择该文件，程序会自动解压并配置</p>
       <div class="mirror-list">
         ${FFMPEG_MIRRORS.map(m => `
           <div class="mirror-item">
@@ -643,19 +643,19 @@ function renderFFmpegModal() {
         <button class="btn btn-ghost" id="ffmpegImportArchive" ${busy ? 'disabled' : ''}>${icon('package', 15)}导入安装包(.7z / .zip)</button>
         <button class="btn btn-ghost" id="ffmpegPickFile" ${busy ? 'disabled' : ''}>${icon('file', 15)}选择 ffmpeg.exe</button>
       </div>
-      <p class="ff-hint" style="margin:10px 0 0">导入后会解压安装到程序目录,自动关联 bin 下的可执行文件;也可以直接选择已下载的 ffmpeg.exe。</p>
+      <p class="ff-hint" style="margin:10px 0 0">导入后会解压安装到程序目录，自动关联 bin 下的可执行文件；也可以直接选择已下载的 ffmpeg.exe</p>
     </div>
     <div class="ff-section">
       <div class="ff-section-title">自动安装</div>
       <button class="btn btn-primary btn-block" id="ffmpegAutoInstall" ${busy ? 'disabled' : ''}>${icon('download', 15)}自动下载安装(约 110 MB)</button>
-      <p class="ff-hint" style="margin:9px 0 0">从官方地址下载压缩包并解压,会走已配置的代理;国内网络较慢时建议使用上方镜像手动下载。</p>
+      <p class="ff-hint" style="margin:9px 0 0">从官方地址下载压缩包并解压，会走已配置的代理；国内网络较慢时建议使用上方镜像手动下载</p>
     </div>
     ${showProgress ? `<div class="ff-progress">
       <div class="ff-progress-head"><span id="ffmpegProgressLabel">${safe(state.ffmpegMessage || '准备中…')}</span><b id="ffmpegProgressPct">${indeterminate ? '' : state.ffmpegProgress + '%'}</b></div>
       <div class="ff-track ${indeterminate ? 'indeterminate' : ''}"><span id="ffmpegProgressBar" style="width:${state.ffmpegProgress}%"></span></div>
     </div>` : ''}
     <div class="modal-foot">
-      <span>${state.ffmpegReady ? '重新安装会替换程序目录内的版本' : '安装完成后自动生效,无需重启'}</span>
+      <span>${state.ffmpegReady ? '重新安装会替换程序目录内的版本' : '安装完成后自动生效，无需重启'}</span>
       <button class="btn btn-ghost btn-sm" id="ffmpegModalCancel">关闭</button>
     </div>
   </div></div>`
@@ -1011,13 +1011,13 @@ async function pauseAll() {
 
 async function openFolder() {
   if (backend()?.OpenDownloadFolder) {
-    try { await backend().OpenDownloadFolder() } catch (error) { toast(`无法打开文件夹:${error.message}`) }
+    try { await backend().OpenDownloadFolder() } catch (error) { toast(`无法打开文件夹：${error.message}`) }
   } else toast('请在桌面版中打开下载文件夹')
 }
 
 async function openDataFolder() {
   if (backend()?.OpenDataFolder) {
-    try { await backend().OpenDataFolder() } catch (error) { toast(`无法打开数据目录:${error.message}`) }
+    try { await backend().OpenDataFolder() } catch (error) { toast(`无法打开数据目录：${error.message}`) }
   } else toast('请在桌面版中打开数据目录')
 }
 
@@ -1051,7 +1051,7 @@ function resetSettings() {
   state.highFrameRate = true
   state.openOnComplete = false
   state.settingsDirty = true
-  render(); toast('已恢复默认值,点击「保存」生效')
+  render(); toast('已恢复默认值，点击「保存」生效')
 }
 
 async function browse() {
@@ -1071,7 +1071,7 @@ async function browseCookieFile() {
       render()
       toast('已选择 Cookies 文件')
     }
-  } catch (error) { toast(`选择文件失败:${error.message}`) }
+  } catch (error) { toast(`选择文件失败：${error.message}`) }
 }
 
 function setCookieSource(source) {
@@ -1099,7 +1099,7 @@ async function refreshBrowserRunning() {
       if (hint) {
         hint.classList.toggle('warn', running)
         hint.textContent = running
-          ? state.cookieBrowser + ' 正在运行 —— 读取 Cookies 会失败,请彻底退出后再试'
+          ? state.cookieBrowser + ' 正在运行 —— 读取 Cookies 会失败，请彻底退出后再试'
           : '此方式需完全退出浏览器(含后台进程)后使用'
       }
     }
@@ -1140,7 +1140,7 @@ async function testProxy() {
       state.proxyReady = !!result.ok
       state.proxyMessage = result.message
       render(); toast(result.message)
-    } catch (error) { toast(`代理测试失败:${error.message}`) }
+    } catch (error) { toast(`代理测试失败：${error.message}`) }
   } else toast('代理测试仅在桌面版可用')
 }
 
@@ -1205,7 +1205,7 @@ async function finishFFmpegResult(result) {
     state.ffmpegPhase = ''
     state.ffmpegMessage = ''
     render()
-    toast((result && result.message) || '操作未完成,请重试')
+    toast((result && result.message) || '操作未完成，请重试')
   }
 }
 
@@ -1225,7 +1225,7 @@ async function installFFmpeg() {
     state.ffmpegPhase = ''
     state.ffmpegMessage = ''
     render()
-    toast('安装失败:' + (error.message || '未知错误'))
+    toast('安装失败：' + (error.message || '未知错误'))
   }
 }
 
@@ -1245,7 +1245,7 @@ async function importFFmpegArchive() {
     state.ffmpegPhase = ''
     state.ffmpegMessage = ''
     render()
-    toast('导入失败:' + (error.message || '未知错误'))
+    toast('导入失败：' + (error.message || '未知错误'))
   }
 }
 
@@ -1265,7 +1265,7 @@ async function pickFFmpegFile() {
     } else {
       toast((result && result.message) || '所选文件无效')
     }
-  } catch (error) { toast('选择失败:' + (error.message || '未知错误')) }
+  } catch (error) { toast('选择失败：' + (error.message || '未知错误')) }
 }
 
 function updateFFmpegProgressUI() {

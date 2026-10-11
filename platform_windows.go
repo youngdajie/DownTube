@@ -46,7 +46,7 @@ func acquireSingleInstance() (func(), bool) {
 }
 
 func showAlreadyRunningDialog() {
-	text, _ := syscall.UTF16PtrFromString("DownTube 已经在运行了。\n请切换到任务栏中已打开的窗口。")
+	text, _ := syscall.UTF16PtrFromString("DownTube 已经在运行了。\n请切换到任务栏中已打开的窗口")
 	title, _ := syscall.UTF16PtrFromString("DownTube")
 	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(text)), uintptr(unsafe.Pointer(title)), 0x40)
 }

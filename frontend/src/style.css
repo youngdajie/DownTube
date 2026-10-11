@@ -849,7 +849,7 @@ h1, h2, h3, p { margin: 0; }
   padding: 26px 28px 28px;
   transition: background-color .2s ease, border-color .2s ease;
 }
-.about-brand { display: flex; align-items: flex-start; gap: 16px; }
+.about-brand { display: flex; align-items: center; gap: 16px; }
 .about-logo { width: 56px; height: 56px; border-radius: 14px; }
 .about-overline { font-size: 11px; font-weight: 700; letter-spacing: 1.4px; color: var(--primary); }
 .about-title { font-size: 26px; font-weight: 700; letter-spacing: -.5px; color: var(--text); margin-top: 3px; }
