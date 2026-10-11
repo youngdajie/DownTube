@@ -905,3 +905,71 @@ func TestPauseDuringTranscodeAndResume(t *testing.T) {
 		t.Errorf("成品缺少音轨")
 	}
 }
+
+// TestTranscodeSpecialDirChars 验证源文件名含 #、中文、单引号等特殊字符时
+// 分段转码仍能拼接成功(历史上相对路径会被 ffmpeg 当 URL 锚点截断,永远失败)。
+func TestTranscodeSpecialDirChars(t *testing.T) {
+	if os.Getenv("DOWNTUBE_IT") == "" {
+		t.Skip("设置 DOWNTUBE_IT=1 运行该集成测试")
+	}
+	baseDir := filepath.Join(os.TempDir(), "downtube-it")
+	_ = os.MkdirAll(baseDir, 0o755)
+	ffmpegPath := ensureTestFFmpeg(t, baseDir)
+
+	// 目录与文件名都带 # ⧸ 单引号,覆盖会触发路径截断的组合
+	specialDir := filepath.Join(baseDir, "特殊 目录 #1")
+	_ = os.MkdirAll(specialDir, 0o755)
+	src := filepath.Join(specialDir, "标题 含#号 ⧸ it's 测试.mp4")
+	_ = os.Remove(src)
+	_ = os.RemoveAll(hevcPartsDir(src))
+	gen := exec.Command(ffmpegPath, "-y", "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30:duration=40",
+		"-f", "lavfi", "-i", "sine=frequency=440:duration=40",
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "60", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", src)
+	hideConsoleWindow(gen)
+	if out, err := gen.CombinedOutput(); err != nil {
+		t.Fatalf("生成测试视频失败: %v %s", err, string(out))
+	}
+
+	app := &App{
+		store:         Store{Version: 2, NextID: 2, Tasks: []Task{{ID: 1, Status: StatusRunning}}, Settings: defaultSettings()},
+		workers:       make(map[int]context.CancelFunc),
+		retryAttempts: make(map[int]int),
+		bestProgress:  make(map[int]int),
+		disableEvents: true,
+		titleJobs:     make(chan struct{}, 2),
+	}
+	app.ctx = context.Background()
+
+	if err := app.transcodeToHEVC(context.Background(), 1, src, 40, ffmpegPath); err != nil {
+		t.Fatalf("特殊字符目录下转码失败: %v", err)
+	}
+	// 转码成功后源文件被替换为 HEVC 成品
+	if _, err := os.Stat(src); err != nil {
+		t.Fatalf("成品不存在: %v", err)
+	}
+	if _, err := os.Stat(hevcPartsDir(src)); !os.IsNotExist(err) {
+		t.Errorf("工作目录未清理")
+	}
+	probe := exec.Command(filepath.Join(filepath.Dir(ffmpegPath), "ffprobe.exe"), "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=codec_name", "-of", "csv=p=0", src)
+	hideConsoleWindow(probe)
+	out, err := probe.CombinedOutput()
+	if err != nil {
+		t.Fatalf("校验成品失败: %v %s", err, string(out))
+	}
+	codec := strings.TrimSpace(string(out))
+	t.Logf("特殊字符目录下的成品编码: %s", codec)
+	if codec != "hevc" {
+		t.Errorf("期望 hevc,实际 %s", codec)
+	}
+	got, derr := probeDuration(ffmpegPath, src)
+	if derr != nil {
+		t.Fatalf("读取成品时长失败: %v", derr)
+	}
+	t.Logf("成品时长: %.2f 秒(源 40 秒)", got)
+	if got < 38 || got > 42 {
+		t.Errorf("成品时长异常: %.2f 秒", got)
+	}
+	_ = os.Remove(src)
+}

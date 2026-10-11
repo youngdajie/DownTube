@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -1354,24 +1355,15 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 
 	// 3) 拼接为成品
 	a.updateProgress(id, 99, "转码 H.265 中")
-	listPath := filepath.Join(partsDir, "concat.txt")
-	var list strings.Builder
-	for i := range segments {
-		list.WriteString(fmt.Sprintf("file 'enc/out-%04d.mp4'\n", i))
-	}
-	if werr := os.WriteFile(listPath, []byte(list.String()), 0o644); werr != nil {
-		return werr
-	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
-		"-y", "-hide_banner", "-loglevel", "error",
-		"-f", "concat", "-safe", "0", "-i", listPath,
-		"-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart",
-		tmpPath)
-	hideConsoleWindow(cmd)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("拼接转码片段失败：%s", ffmpegErrText(err, stderrBuf.Bytes()))
+	if jerr := concatEncodedSegments(ffmpegPath, partsDir, encDir, len(segments), tmpPath); jerr != nil {
+		// 拼接环节失败(历史上有特殊字符目录导致路径被截断的情况):
+		// 清掉工作目录后整段重新转码一次,保证一定能产出成品
+		_ = os.RemoveAll(partsDir)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		a.updateProgress(id, 0, "转码 H.265 中")
+		return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
 	}
 	// 拼接结果自检:时长与预期明显不符时视为失败并重置缓存,避免产出被截断的成品
 	if total > 0 {
@@ -1382,6 +1374,49 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 	}
 	_ = os.RemoveAll(partsDir)
 	return nil
+}
+
+// concatEncodedSegments 把已编码的片段按顺序拼接为成品。
+// 注意两点:列表文件必须放在无特殊字符的临时目录(ffmpeg 解析路径时不会把源目录名
+// 带入),条目一律使用绝对路径并转义单引号——工作目录名里出现 # 等字符时,
+// 相对路径会被 ffmpeg 当作 URL 锚点截断,导致永远找不到片段。
+func concatEncodedSegments(ffmpegPath, partsDir, encDir string, count int, outPath string) error {
+	if count <= 0 {
+		return errors.New("没有可拼接的转码片段")
+	}
+	sum := sha256.Sum256([]byte(partsDir))
+	listDir := filepath.Join(os.TempDir(), "downtube-concat")
+	if err := os.MkdirAll(listDir, 0o755); err != nil {
+		return err
+	}
+	listPath := filepath.Join(listDir, fmt.Sprintf("concat-%x.txt", sum[:8]))
+	defer os.Remove(listPath)
+
+	var list strings.Builder
+	for i := 0; i < count; i++ {
+		abs := filepath.ToSlash(filepath.Join(encDir, fmt.Sprintf("out-%04d.mp4", i)))
+		list.WriteString("file '" + escapeConcatPath(abs) + "'\n")
+	}
+	if err := os.WriteFile(listPath, []byte(list.String()), 0o644); err != nil {
+		return err
+	}
+	cmd := exec.Command(ffmpegPath,
+		"-y", "-hide_banner", "-loglevel", "error",
+		"-f", "concat", "-safe", "0", "-i", listPath,
+		"-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart",
+		outPath)
+	hideConsoleWindow(cmd)
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("拼接转码片段失败：%s", ffmpegErrText(err, stderrBuf.Bytes()))
+	}
+	return nil
+}
+
+// escapeConcatPath 处理 ffconcat 列表中的路径转义:单引号需用 '\'' 的方式闭合转义。
+func escapeConcatPath(path string) string {
+	return strings.ReplaceAll(path, "'", `'\''`)
 }
 
 // splitSource 用流拷贝把源视频按关键帧切分为 mkv 片段,并写出 CSV(名称,起点,终点)。
