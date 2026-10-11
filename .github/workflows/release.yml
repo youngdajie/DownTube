@@ -1,0 +1,169 @@
+# DownTube GitHub 发版流水线
+#
+# 与 .cnb.yml 等效：推一个「V + 版本号」的标签就全自动跑完：
+#   交叉编译 → 打 NSIS 安装包 → 建 Release → 挂安装包 → 删掉历史 Release（只留当前）
+#
+#   git tag -a V1.1.0 -m "1.1.0" && git push github refs/tags/V1.1.0
+#
+# 与 CNB 的关系：两边各自独立、互不干扰 —— CNB 的产物发布在 CNB Releases，
+# 这里的产物发布在 GitHub Releases。
+#
+# 额外提供 workflow_dispatch 手动触发：只构建、不上架（产物存 Actions artifacts），
+# 用于验证流水线本身的健康度。
+#
+# 版本号唯一来源同样是 wails.json 的 info.productVersion。
+
+name: release
+
+on:
+  push:
+    tags: ['V*']
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # ============================================================ 环境
+      - name: 检出代码（含 Git LFS）
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: 安装 Go 1.27
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装 NSIS（makensis）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nsis
+
+      - name: 安装 Wails CLI
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # ============================================================ 版本号
+      - name: 读版本号并校验标签
+        id: version
+        run: |
+          set -e
+          VERSION="$(jq -r '.info.productVersion // empty' wails.json)"
+          [ -n "$VERSION" ] || { echo "wails.json 里读不到 info.productVersion"; exit 1; }
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "版本号 $VERSION 不是 x.y.z 的形式"; exit 1 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # 标签必须和版本号一致，否则会出现「包里是旧版、Release 挂在新标签上」
+            [ "$GITHUB_REF_NAME" = "V$VERSION" ] || {
+              echo "标签 $GITHUB_REF_NAME 与 wails.json 里的版本 $VERSION 对不上（应为 V$VERSION）"; exit 1; }
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "版本 $VERSION · 标签 $GITHUB_REF_NAME · 运行编号 $GITHUB_RUN_NUMBER"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "手动触发：只构建、不上架 · 版本 $VERSION · 运行编号 $GITHUB_RUN_NUMBER"
+          fi
+
+      # ============================================================ 构建
+      - name: 校验 LFS 真身
+        run: |
+          SIZE=$(stat -c%s tools/yt-dlp.exe)
+          echo "tools/yt-dlp.exe：$SIZE 字节"
+          if [ "$SIZE" -lt 1048576 ]; then
+            echo "看起来是 Git LFS 指针文件而不是真的 exe，检查 LFS 检出是否完整。"
+            exit 1
+          fi
+
+      - name: 构建安装包
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -e
+          wails version
+          wails build -nsis -clean -platform windows/amd64
+
+          # makensis 缺失时 wails build -nsis 照样退出 0，只是不打安装包，必须验产物
+          SETUP_SRC="build/bin/DownTube-Setup.exe"
+          if [ ! -f "$SETUP_SRC" ]; then
+            echo "安装包没生成：$SETUP_SRC"
+            ls -l build/bin/ || true
+            exit 1
+          fi
+
+          # 文件名 = 安装包-版本号-运行编号：同名版本重跑不会互相覆盖
+          SETUP_DST="build/bin/DownTube-Setup-${VERSION}-${GITHUB_RUN_NUMBER}.exe"
+          mv "$SETUP_SRC" "$SETUP_DST"
+          ls -lh build/bin/
+
+      # ============================================================ 测试模式
+      - name: 上传构建产物（手动触发专用）
+        if: steps.version.outputs.release != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: DownTube-Setup-${{ steps.version.outputs.version }}-${{ github.run_number }}
+          path: build/bin/DownTube-Setup-*.exe
+          if-no-files-found: error
+          overwrite: true
+
+      # ============================================================ 发版
+      - name: 建 Release 并挂安装包
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -e
+          TAG="V${VERSION}"
+          NOTES="docs/releases/${VERSION}.md"
+
+          # 同一个标签重跑：删掉重建，保证正文与附件都是这一次构建出来的
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，删掉重建"
+            gh release delete "$TAG" --yes
+          fi
+
+          if [ -f "$NOTES" ]; then
+            gh release create "$TAG" --title "$TAG" --notes-file "$NOTES" build/bin/DownTube-Setup-*.exe
+          else
+            echo "未找到 $NOTES，正文改为自动生成"
+            gh release create "$TAG" --title "$TAG" --generate-notes build/bin/DownTube-Setup-*.exe
+          fi
+
+          ASSETS=$(gh release view "$TAG" --json assets --jq '.assets | length')
+          [ "$ASSETS" -ge 1 ] || { echo "Release 建好了但附件是空的"; exit 1; }
+          echo "已发布：$(gh release view "$TAG" --json url --jq '.url')"
+
+      - name: 清理旧版本（只留当前）
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # 清理失败不该让发版变红 —— 包已经挂上去了，这一步只是省额度
+          TAG="V${VERSION}"
+          gh release list --limit 100 --json tagName --jq '.[].tagName' | while read -r t; do
+            [ -z "$t" ] && continue
+            [ "$t" = "$TAG" ] && { echo "保留当前版本 $t"; continue; }
+            gh release delete "$t" --yes && echo "删除旧版本 $t" || echo "删除 $t 失败（跳过）"
+          done || true
+          exit 0

@@ -50,19 +50,19 @@ wails build -nsis -clean -platform windows/amd64
 | --- | --- |
 | exe 版本资源 | wails 构建时写进 PE 资源，资源管理器属性页看到的版本 |
 | 界面上的版本 | `frontend/vite.config.js` 通过 `define` 注入 `__APP_VERSION__` |
-| tag 与安装包名 | `.cnb.yml` 流水线读取后拼成 `V<版本号>` |
+| tag 与安装包名 | `.cnb.yml` 与 `.github/workflows/release.yml` 读取后拼成 `V<版本号>` |
 
 发一个新版本：
 
 1. 改 `wails.json` 的 `info.productVersion`（顺手同步 `frontend/package.json` 的 `version`）
 2. 版本说明写进 `docs/releases/<版本号>.md`（Release 页的正文就是它，不写就退回 tag 附注）
 3. 提交并推送到 GitHub 与 CNB
-4. 推标签：`git tag -a V0.2.0 -m "0.2.0" && git push cnb refs/tags/V0.2.0`
+4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.1.0 -m "1.1.0" && git push origin refs/tags/V1.1.0 && git push github refs/tags/V1.1.0`
 
 标签格式必须是 `V` + `wails.json` 里的版本号，对不上流水线会直接红掉 ——
 这样就不会出现「安装包是 0.2.0、Release 却挂在 V0.3.0 上」的情况。
 
-之后 CNB 流水线自动跑完：交叉编译 → 打 NSIS 安装包 → 建 Release（绑定 `V<版本号>` 标签）→ 挂 `DownTube-Setup-<版本号>-<流水线编号>.exe` → 删掉历史 Release 回收存储额度。
+之后两条流水线各自自动跑完：交叉编译 → 打 NSIS 安装包 → 在本平台建 Release（绑定同一个 `V<版本号>` 标签）→ 挂 `DownTube-Setup-<版本号>-<编号>.exe` → 删掉历史 Release 回收存储额度。CNB 侧配置在 `.cnb.yml`，GitHub 侧配置在 `.github/workflows/release.yml`；GitHub 侧还可以用 `gh workflow run release.yml` 手动触发一次「只构建、不上架」的健康检查。
 
 标签推上去之后本地删不掉（`cnb git delete-tag` 需要 `repo-release:rw`，本地令牌没有，流水线的可信令牌才有）。这一版流水线跑挂了想重来，两条路：
 
