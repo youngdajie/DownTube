@@ -610,7 +610,16 @@ h1, h2, h3, p { margin: 0; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.task-sub.error { color: var(--danger); }
+/* 报错要完整显示:错误信息常含原因与处理建议，截断成「…」等于没告诉用户。
+   URL 仍然单行省略，因为它没有阅读价值、只用于辨认来源。 */
+.task-sub.error {
+  color: var(--danger);
+  white-space: pre-wrap;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
 
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); white-space: nowrap; }
 .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }

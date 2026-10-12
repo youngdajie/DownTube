@@ -977,12 +977,18 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 		}
 	}
 	detail := res.stderrText
-	if err != nil && detail != "" {
-		detail = extractErrorLines(detail)
-		if hint := transcriptHints(detail, settings, ffmpegErr != nil); hint != "" {
-			detail += hint
+	if err != nil {
+		// 界面上只放中文:先把内核报错翻成中文,再补上可操作的排查建议。
+		// 翻译不到时 engineErrorText 会保留原文,避免把有用的线索丢掉。
+		msg := engineErrorText(extractErrorLines(detail))
+		if msg == "" {
+			msg = "下载失败，下载内核没有给出具体原因"
 		}
-		err = fmt.Errorf("%w: %s", err, detail)
+		// 建议的匹配基于英文原文,所以这里传 detail 而不是译文
+		if hint := transcriptHints(detail, settings, ffmpegErr != nil); hint != "" {
+			msg += hint
+		}
+		err = errors.New(msg)
 	}
 	a.finishTask(id, err)
 }
@@ -1277,9 +1283,9 @@ func (a *App) transcodeToHEVC(ctx context.Context, id int, srcPath string, durat
 // hevcSegmentSeconds 转码分片的目标时长(秒)。分片保证中断后可复用已完成片段续跑。
 const hevcSegmentSeconds = 30
 
-// hevcSegment 描述一个待编码的分片及它在源视频中的时间范围。
+// hevcSegment 描述一个待编码的分片在源视频中的时间范围。
+// 分片边界由 planTranscodeSegments 算出来,不再依赖预切分产物。
 type hevcSegment struct {
-	path       string
 	start, end float64
 }
 
@@ -1291,18 +1297,53 @@ func (s hevcSegment) dur() float64 {
 	return d
 }
 
+// planTranscodeSegments 按固定时长把总时长切成若干分片,最后一片取剩余时长。
+// 边界由计算得出而非来自对源文件的一次流拷贝切分:省掉一整遍读盘与 .mkv 中间文件,
+// 更重要的是切点可以精确落在整秒上,不会因关键帧位置产生偏移。
+func planTranscodeSegments(total float64) []hevcSegment {
+	if total <= 0 {
+		return nil
+	}
+	step := float64(hevcSegmentSeconds)
+	count := int(total / step)
+	// 不能整除时补一段(留 1 毫秒容差,避免浮点误差多切出一段空的)
+	if float64(count)*step < total-0.001 {
+		count++
+	}
+	out := make([]hevcSegment, 0, count)
+	for i := 0; i < count; i++ {
+		start := float64(i) * step
+		end := start + step
+		if end > total {
+			end = total
+		}
+		if end <= start {
+			break
+		}
+		out = append(out, hevcSegment{start: start, end: end})
+	}
+	return out
+}
+
 // hevcPartsDir 返回某个源文件对应的转码工作目录(与源文件同目录,便于续跑时定位)。
 func hevcPartsDir(srcPath string) string {
 	return strings.TrimSuffix(srcPath, filepath.Ext(srcPath)) + ".hevc-parts"
 }
 
-// transcodeSegmented 把源视频切分为若干片段分别编码,全部完成后拼接为 tmpPath。
+// transcodeSegmented 把源视频按时长分段编码,全部完成后拼接为 tmpPath。
 // 已完成的片段会被直接复用,因此暂停、关闭程序或编码失败后再次执行时会从断点继续。
+//
+// 两处关键设计(踩过坑,别改回去):
+//  1. 不做预切分。分片区间由 planTranscodeSegments 算出,每段直接从源文件用
+//     -ss/-t 精确切片编码。用流拷贝预切分的话,切点被对齐到视频关键帧,
+//     而关键帧不落在整秒上,会让每段内部视频比音频晚起约 0.1 秒,拼接时
+//     每个接缝都被插入一个约 0.13 秒的音视频空洞(实测 20 分钟视频累计 5 秒),
+//     最终撑大声明时长、触发下面那条时长自检而反复失败。
+//  2. 片段只编码视频,音频在最后一步从源文件整段取。流拷贝无法在任意时间点
+//     切割音频,若跟着分段走,接缝处会把多个音频包压进极短时间(听感是咔哒声)。
 func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPath, tmpPath string, duration float64, spec hevcEncoderSpec) error {
 	partsDir := hevcPartsDir(srcPath)
-	segDir := filepath.Join(partsDir, "seg")
 	encDir := filepath.Join(partsDir, "enc")
-	csvPath := filepath.Join(partsDir, "segments.csv")
 	markerPath := filepath.Join(partsDir, "source.info")
 
 	// 源文件发生变化(重新下载等)时废弃旧的片段缓存
@@ -1319,25 +1360,15 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 	}
 	_ = os.WriteFile(markerPath, []byte(marker), 0o644)
 
-	// 1) 切分:缺失或不完整时执行(切分失败时回退整段转码)
-	segments, err := readSegmentList(csvPath, segDir)
-	if err != nil {
-		_ = os.RemoveAll(segDir)
-		_ = os.MkdirAll(segDir, 0o755)
-		_ = os.Remove(csvPath)
-		a.updateProgress(id, 0, "转码 H.265 中")
-		if serr := splitSource(ctx, ffmpegPath, srcPath, segDir, csvPath); serr != nil {
-			return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
-		}
-		segments, err = readSegmentList(csvPath, segDir)
-		if err != nil {
-			return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
-		}
-	}
-
+	// 1) 定总时长:优先实测源文件,实测不到再用调用方传入的值。
+	// 时长决定分片数量,推算不出来时退回整段转码。
 	total := duration
-	if total <= 0 {
-		total = segments[len(segments)-1].end
+	if probed, perr := probeDuration(ffmpegPath, srcPath); perr == nil && probed > 0 {
+		total = probed
+	}
+	segments := planTranscodeSegments(total)
+	if len(segments) == 0 {
+		return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
 	}
 
 	// 2) 逐片编码:已存在的片段文件直接复用(断点续跑)
@@ -1351,15 +1382,15 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 			done += seg.dur()
 			continue
 		}
-		if eerr := a.encodeSegment(ctx, id, ffmpegPath, seg.path, outPath, done, total, spec); eerr != nil {
+		if eerr := a.encodeSegment(ctx, id, ffmpegPath, srcPath, seg, outPath, done, total, spec); eerr != nil {
 			return eerr
 		}
 		done += seg.dur()
 	}
 
-	// 3) 拼接为成品
+	// 3) 拼接视频片段并从源文件取整段音频
 	a.updateProgress(id, 99, "转码 H.265 中")
-	if jerr := concatEncodedSegments(ffmpegPath, partsDir, encDir, len(segments), tmpPath); jerr != nil {
+	if jerr := concatWithSourceAudio(ffmpegPath, partsDir, encDir, len(segments), srcPath, tmpPath); jerr != nil {
 		// 拼接环节失败(历史上有特殊字符目录导致路径被截断的情况):
 		// 清掉工作目录后整段重新转码一次,保证一定能产出成品
 		_ = os.RemoveAll(partsDir)
@@ -1369,7 +1400,8 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 		a.updateProgress(id, 0, "转码 H.265 中")
 		return a.runTranscode(ctx, id, ffmpegPath, srcPath, tmpPath, duration, spec)
 	}
-	// 拼接结果自检:时长与预期明显不符时视为失败并重置缓存,避免产出被截断的成品
+	// 拼接结果自检:时长与预期明显不符时视为失败并重置缓存,避免产出被截断的成品。
+	// 分片边界精确 + 音频整段取自源文件,正常产出的时长与源文件相差在毫秒级。
 	if total > 0 {
 		if got, derr := probeDuration(ffmpegPath, tmpPath); derr == nil && (got < total-2 || got > total+2) {
 			_ = os.RemoveAll(partsDir)
@@ -1380,11 +1412,13 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 	return nil
 }
 
-// concatEncodedSegments 把已编码的片段按顺序拼接为成品。
+// concatWithSourceAudio 把已编码的视频片段拼接为成品,音频直接从源文件整段拷贝。
+// 视频片段各自精确覆盖源时间轴的一段,拼接后与源视频逐帧对齐,音频再整段取回,
+// 因此成品里既没有接缝空洞,也不会重复音频。
 // 注意两点:列表文件必须放在无特殊字符的临时目录(ffmpeg 解析路径时不会把源目录名
 // 带入),条目一律使用绝对路径并转义单引号——工作目录名里出现 # 等字符时,
 // 相对路径会被 ffmpeg 当作 URL 锚点截断,导致永远找不到片段。
-func concatEncodedSegments(ffmpegPath, partsDir, encDir string, count int, outPath string) error {
+func concatWithSourceAudio(ffmpegPath, partsDir, encDir string, count int, srcPath, outPath string) error {
 	if count <= 0 {
 		return errors.New("没有可拼接的转码片段")
 	}
@@ -1407,6 +1441,8 @@ func concatEncodedSegments(ffmpegPath, partsDir, encDir string, count int, outPa
 	cmd := exec.Command(ffmpegPath,
 		"-y", "-hide_banner", "-loglevel", "error",
 		"-f", "concat", "-safe", "0", "-i", listPath,
+		"-i", srcPath,
+		"-map", "0:v", "-map", "1:a",
 		"-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart",
 		outPath)
 	hideConsoleWindow(cmd)
@@ -1423,61 +1459,12 @@ func escapeConcatPath(path string) string {
 	return strings.ReplaceAll(path, "'", `'\''`)
 }
 
-// splitSource 用流拷贝把源视频按关键帧切分为 mkv 片段,并写出 CSV(名称,起点,终点)。
-func splitSource(ctx context.Context, ffmpegPath, srcPath, segDir, csvPath string) error {
-	cmd := exec.CommandContext(ctx, ffmpegPath,
-		"-y", "-hide_banner", "-loglevel", "error",
-		"-i", srcPath,
-		"-c", "copy",
-		"-f", "segment",
-		"-segment_time", fmt.Sprint(hevcSegmentSeconds),
-		"-reset_timestamps", "1",
-		"-segment_format", "matroska",
-		"-segment_list", csvPath,
-		"-segment_list_type", "csv",
-		filepath.Join(segDir, "seg-%04d.mkv"))
-	hideConsoleWindow(cmd)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("切分源视频失败：%s", ffmpegErrText(err, stderrBuf.Bytes()))
-	}
-	return nil
-}
-
-// readSegmentList 读取切分产出的 CSV,并校验片段文件存在且非空。
-func readSegmentList(csvPath, segDir string) ([]hevcSegment, error) {
-	data, err := os.ReadFile(csvPath)
-	if err != nil {
-		return nil, err
-	}
-	var out []hevcSegment
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		fields := strings.Split(strings.TrimSpace(line), ",")
-		if len(fields) < 3 {
-			continue
-		}
-		name := filepath.Base(strings.TrimSpace(fields[0]))
-		start, e1 := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
-		end, e2 := strconv.ParseFloat(strings.TrimSpace(fields[2]), 64)
-		if e1 != nil || e2 != nil {
-			continue
-		}
-		p := filepath.Join(segDir, name)
-		fi, ferr := os.Stat(p)
-		if ferr != nil || fi.Size() == 0 {
-			return nil, errors.New("分片文件缺失")
-		}
-		out = append(out, hevcSegment{path: p, start: start, end: end})
-	}
-	if len(out) == 0 {
-		return nil, errors.New("分片列表为空")
-	}
-	return out, nil
-}
-
-// encodeSegment 编码单个片段,并把片段内的编码进度折算为整体进度上报。
-func (a *App) encodeSegment(ctx context.Context, id int, ffmpegPath, segPath, outPath string, doneDur, totalDur float64, spec hevcEncoderSpec) error {
+// encodeSegment 直接从源文件切出 seg 这一段并编码为 H.265,同时把片段内的编码进度
+// 折算为整体进度上报。
+// -ss 放在 -i 之前:配合重编码可以快速定位到目标时间点且输出时间轴精确从该点开始,
+// 分段边界因此严格落在整秒上(预切分方案做不到这点,见 transcodeSegmented 注释)。
+// 这里只处理视频(-an),音频由 concatWithSourceAudio 从源文件整段取回。
+func (a *App) encodeSegment(ctx context.Context, id int, ffmpegPath, srcPath string, seg hevcSegment, outPath string, doneDur, totalDur float64, spec hevcEncoderSpec) error {
 	phase := "转码 H.265 中"
 	if spec.phase != "" {
 		phase = "转码 H.265 中(" + spec.phase + ")"
@@ -1492,13 +1479,16 @@ func (a *App) encodeSegment(ctx context.Context, id int, ffmpegPath, segPath, ou
 	args := []string{
 		"-y", "-hide_banner", "-loglevel", "error",
 		"-progress", "pipe:1", "-nostats",
-		"-i", segPath,
+		"-ss", strconv.FormatFloat(seg.start, 'f', 3, 64),
+		"-i", srcPath,
+		"-t", strconv.FormatFloat(seg.dur(), 'f', 3, 64),
+		"-an",
 	}
 	args = append(args, spec.videoArgs...)
 	// 先写临时文件,编码成功后再原子改名:中断产生的半成品不会被续跑误用
 	tmpOut := strings.TrimSuffix(outPath, ".mp4") + ".tmp.mp4"
 	defer os.Remove(tmpOut)
-	args = append(args, "-tag:v", "hvc1", "-c:a", "copy", tmpOut)
+	args = append(args, "-tag:v", "hvc1", tmpOut)
 	cmd := exec.CommandContext(ctx, ffmpegPath, args...)
 	hideConsoleWindow(cmd)
 	stdout, err := cmd.StdoutPipe()
@@ -1560,15 +1550,19 @@ func probeDuration(ffmpegPath, mediaPath string) (float64, error) {
 }
 
 // ffmpegErrText 把 ffmpeg 的失败归类为可读的错误文本。
+// 命中翻译规则时给出中文说明;翻译不到时保留原文并截断,便于排查。
 func ffmpegErrText(err error, stderr []byte) string {
-	msg := strings.TrimSpace(decodeOutput(stderr))
-	if len(msg) > 300 {
-		msg = msg[:300] + "…"
+	raw := strings.TrimSpace(decodeOutput(stderr))
+	if zh := engineErrorZh(raw); zh != "" {
+		return zh
 	}
-	if msg == "" {
-		msg = err.Error()
+	if raw == "" {
+		raw = err.Error()
 	}
-	return msg
+	if len(raw) > 300 {
+		raw = raw[:300] + "…"
+	}
+	return raw
 }
 
 // runTranscode 执行一次 H.265 编码并在过程中上报进度。
@@ -1784,6 +1778,175 @@ func extractErrorLines(raw string) string {
 		return strings.TrimSpace(raw)
 	}
 	return strings.Join(picked, "\n")
+}
+
+// engineErrorRules 把下载内核(yt-dlp)与 FFmpeg 的英文报错翻成中文。
+// match 一律小写,匹配前会把待查文本转小写。命中即返回中文说明,不看后面的规则,
+// 所以更具体的规则要排在更笼统的前面。
+var engineErrorRules = []struct{ match, zh string }{
+	// —— 内容与权限 ——
+	{"unsupported url", "下载内核不支持这个链接"},
+	{"no video formats found", "没有找到可下载的视频流"},
+	{"video unavailable", "视频不可用，可能已被删除或设为私享"},
+	{"this video is private", "这是私享视频，需要拥有访问权限的账号 Cookies"},
+	{"private video", "这是私享视频，需要拥有访问权限的账号 Cookies"},
+	{"available to this channel's members", "会员专属内容，需要对应账号的 Cookies"},
+	{"members-only", "会员专属内容，需要对应账号的 Cookies"},
+	{"members only", "会员专属内容，需要对应账号的 Cookies"},
+	{"join this channel", "会员专属内容，需要对应账号的 Cookies"},
+	{"removed by the uploader", "视频已被上传者删除"},
+	{"not available in your country", "该视频在当前地区不可用，可尝试更换代理节点"},
+	{"blocked in your country", "该视频在当前地区被屏蔽，可尝试更换代理节点"},
+	{"confirm your age", "年龄限制内容，需要登录后的 Cookies"},
+	{"age-restricted", "年龄限制内容，需要登录后的 Cookies"},
+	{"age restricted", "年龄限制内容，需要登录后的 Cookies"},
+	{"requires payment", "该内容需要付费购买"},
+	{"sign in to confirm", "站点要求登录验证，请在设置 → Cookies 中提供 Cookies"},
+	{"not a bot", "站点要求登录验证，请在设置 → Cookies 中提供 Cookies"},
+	{"sign in required", "站点要求登录验证，请在设置 → Cookies 中提供 Cookies"},
+	{"login required", "站点要求登录验证，请在设置 → Cookies 中提供 Cookies"},
+	{"this video requires login", "站点要求登录验证，请在设置 → Cookies 中提供 Cookies"},
+
+	// —— 链接质量与格式 ——
+	{"requested format is not available", "没有符合当前画质设置的格式，试试「最佳可用」或安装 FFmpeg"},
+	{"no such format", "没有符合当前画质设置的格式，请调整画质设置"},
+	{"unable to extract", "无法解析页面数据，可能是站点改版或该内容需要登录"},
+	{"unable to download webpage", "无法访问页面"},
+	{"unable to download video data", "无法下载视频数据，连接可能被中断"},
+	{"unable to download json metadata", "无法获取视频信息，站点接口可能已变更"},
+	{"no video formats", "没有找到可下载的视频流"},
+	{"is not a valid url", "链接格式不正确"},
+	{"failed to parse", "无法解析链接或页面数据"},
+
+	// —— Cookies ——
+	{"could not copy chrome cookie database", "浏览器运行时会锁定 Cookies 数据库，请先完全退出浏览器再重试"},
+	{"unable to open cookie file", "Cookies 文件无法读取，请在设置中重新选择"},
+	{"does not look like a netscape format", "Cookies 文件格式不正确，需要 Netscape 格式的 cookies.txt"},
+	{"cookies file uses an unsupported format", "Cookies 文件格式不正确，需要 Netscape 格式的 cookies.txt"},
+	{"unsupported file format", "Cookies 文件格式不正确，需要 Netscape 格式的 cookies.txt"},
+	{"failed to decrypt", "读取浏览器 Cookies 失败，可改用文件导入方式"},
+	{"could not find", "找不到浏览器数据目录，请在设置里换一个浏览器或改用文件导入"},
+
+	// —— 网络 ——
+	{"connection refused", "连接被拒绝，请检查网络或代理设置"},
+	{"connection reset", "连接被重置，网络或代理不稳定"},
+	{"connection aborted", "连接被中断，网络或代理不稳定"},
+	{"remote end closed connection", "对方中断了连接，网络或代理不稳定"},
+	{"timed out", "连接超时，网络或代理不稳定"},
+	{"timeout", "连接超时，网络或代理不稳定"},
+	{"temporary failure in name resolution", "域名解析失败，请检查网络或代理设置"},
+	{"name or service not known", "域名解析失败，请检查网络或代理设置"},
+	{"getaddrinfo", "域名解析失败，请检查网络或代理设置"},
+	{"ssl", "加密连接建立失败，可能是代理或证书问题"},
+	{"certificate", "证书校验失败，可能是代理或系统时间异常"},
+	{"proxy", "代理连接失败，请检查代理设置"},
+
+	// —— 磁盘与权限 ——
+	{"no space left on device", "磁盘空间不足"},
+	{"permission denied", "没有写入权限，请更换保存目录"},
+	{"access is denied", "没有访问权限，请更换保存目录或检查文件占用"},
+	{"the process cannot access the file", "文件被占用，请关闭正在使用它的程序后重试"},
+	{"too many open files", "打开的文件过多，请稍后重试"},
+
+	// —— FFmpeg ————
+	{"moov atom not found", "文件不完整（缺少索引信息），下载可能被中断"},
+	{"invalid data found when processing input", "输入文件损坏或格式不受支持"},
+	{"unknown encoder", "当前 FFmpeg 不支持所需的编码器，可在设置中改用 CPU 编码"},
+	{"no nvenc capable devices found", "没有找到可用的 NVIDIA 显卡编码器，可在设置中改用 CPU 编码"},
+	{"cannot load nvcuda", "显卡驱动缺少 NVENC 组件，可在设置中改用 CPU 编码"},
+	{"error while opening encoder", "无法初始化编码器，可能是显卡驱动问题，可改用 CPU 编码"},
+	{"conversion failed", "转码失败"},
+	{"error initializing output stream", "初始化输出流失败"},
+	{"invalid argument", "参数不被接受，可能是该文件不被当前 FFmpeg 支持"},
+}
+
+// httpErrorZh 把 "HTTP Error 404"、"HTTP Error 403: Forbidden" 这类报错翻成中文,
+// 并保留状态码便于排查。没找到状态码时返回空串。
+func httpErrorZh(text string) string {
+	idx := strings.Index(text, "http error")
+	if idx < 0 {
+		return ""
+	}
+	tail := strings.TrimLeft(text[idx+len("http error"):], ": ")
+	code := tail
+	if i := strings.IndexFunc(tail, func(r rune) bool { return r < '0' || r > '9' }); i >= 0 {
+		code = tail[:i]
+	}
+	if len(code) != 3 {
+		return ""
+	}
+	suffix := "（HTTP " + code + "）"
+	switch code {
+	case "401", "407":
+		return "需要验证身份" + suffix + "，通常是 Cookies 失效或代理需要认证"
+	case "403":
+		return "请求被拒绝" + suffix + "，通常是 Cookies 失效或当前代理 IP 被限制"
+	case "404", "410":
+		return "资源不存在" + suffix + "，视频可能已被删除或地址有误"
+	case "429":
+		return "请求过于频繁" + suffix + "，请稍后重试或减少并发下载数"
+	}
+	if code[0] == '5' {
+		return "对方服务器出错" + suffix + "，请稍后重试"
+	}
+	return "请求失败" + suffix
+}
+
+// translateOneEngineError 翻译单行内核报错;没有对应规则时返回空串。
+func translateOneEngineError(line string) string {
+	text := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "ERROR:"))
+	// 去掉 yt-dlp 的提取器前缀,如 "[BiliBili] xxx"
+	if strings.HasPrefix(text, "[") {
+		if i := strings.Index(text, "] "); i > 0 && i <= 40 {
+			text = strings.TrimSpace(text[i+2:])
+		}
+	}
+	lower := strings.ToLower(text)
+	if msg := httpErrorZh(lower); msg != "" {
+		return msg
+	}
+	for _, rule := range engineErrorRules {
+		if strings.Contains(lower, rule.match) {
+			return rule.zh
+		}
+	}
+	return ""
+}
+
+// engineErrorZh 翻译整段内核报错(可能有多行),命中多条时用分号连接。
+// 没有一条命中时返回空串,由调用方决定怎么兜底。
+func engineErrorZh(raw string) string {
+	var out []string
+	for _, line := range strings.Split(raw, "\n") {
+		msg := translateOneEngineError(line)
+		if msg == "" {
+			continue
+		}
+		dup := false
+		for _, seen := range out {
+			if seen == msg {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, msg)
+		}
+	}
+	return strings.Join(out, "；")
+}
+
+// engineErrorText 生成给用户看的错误文本:优先中文说明;确实没有对应规则时
+// 保留引擎原文并标注来源,既不丢排查线索,也不会让人误以为是软件自己的报错。
+func engineErrorText(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return ""
+	}
+	if zh := engineErrorZh(text); zh != "" {
+		return zh
+	}
+	return "下载内核报错：" + text
 }
 
 // transcriptHints 针对常见失败原因追加可操作的排查建议.

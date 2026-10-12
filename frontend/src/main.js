@@ -698,7 +698,7 @@ function renderAbout() {
         <div>
           <div class="about-overline">DESKTOP DOWNLOAD TOOL</div>
           <h1 class="about-title">DownTube</h1>
-          <p class="about-desc">一个专注本地下载与任务管理的 YouTube 桌面工具，又不仅限于 YouTube</p>
+          <p class="about-desc">一个专注 YouTube 本地下载与任务管理的桌面工具，但又不仅限于 YouTube</p>
         </div>
       </div>
       <div class="about-divider"></div>
