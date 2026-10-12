@@ -1024,17 +1024,18 @@ func TestUpdateCheckLive(t *testing.T) {
 		t.Fatalf("高版本判断异常: %v", high)
 	}
 
-	// 上一个已发布版本:必须能检出当前版本。
+	// 已发布过的版本:必须都能检出当前版本。
 	// 这条对应真实场景 —— 老用户打开软件时应看到更新提示。
-	// 版本号首次使用时不用改:它永远小于当时的最新版;将来某天它不再小于最新版了,
-	// 说明该版本已被淘汰,把这里换成更新的版本号即可。
-	prev := app.CheckUpdate("1.2.4")
-	t.Logf("1.2.4 → ok=%v hasUpdate=%v latest=%q source=%q", prev["ok"], prev["hasUpdate"], prev["latest"], prev["source"])
-	if prev["ok"] != true {
-		t.Fatalf("上一版本检查失败: %v", prev["error"])
-	}
-	if prev["hasUpdate"] != true {
-		t.Fatalf("上一个已发布版本未检出更新,老用户将收不到提示: %v", prev)
+	// 列表里保留最近几个版本即可;某天某个版本被淘汰(不再小于最新版)时删掉它。
+	for _, prevVersion := range []string{"1.2.4", "1.2.5"} {
+		prev := app.CheckUpdate(prevVersion)
+		t.Logf("%s → ok=%v hasUpdate=%v latest=%q source=%q", prevVersion, prev["ok"], prev["hasUpdate"], prev["latest"], prev["source"])
+		if prev["ok"] != true {
+			t.Fatalf("%s 检查失败: %v", prevVersion, prev["error"])
+		}
+		if prev["hasUpdate"] != true {
+			t.Fatalf("%s 未检出更新,老用户将收不到提示: %v", prevVersion, prev)
+		}
 	}
 }
 
