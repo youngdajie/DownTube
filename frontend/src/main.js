@@ -101,6 +101,9 @@ const state = {
   cookieSource: 'browser',
   cookieBrowser: 'Chrome',
   cookieFile: '',
+  cookiePlatforms: [],
+  cookieDir: '',
+  cookieBusy: '',
   browserRunning: false,
   highFrameRate: true,
   openOnComplete: false,
@@ -332,12 +335,12 @@ function renderAddView() {
   const single = state.linkMode === 'single'
   return `<div class="parse-view">
     <h1 class="parse-title">解析链接</h1>
-    <p class="parse-desc">${single ? '粘贴一个 YouTube 视频链接，解析后加入下载队列' : '粘贴一个或多个 YouTube 来源，每行一个，解析后加入下载队列'}</p>
+    <p class="parse-desc">${single ? '粘贴一个视频链接，解析后加入下载队列' : '粘贴一个或多个视频链接，每行一个，解析后加入下载队列'}</p>
     <div class="tabs">
       <button class="tab ${single ? '' : 'active'}" data-mode="batch">批量链接</button>
       <button class="tab ${single ? 'active' : ''}" data-mode="single">单个视频</button>
     </div>
-    <textarea id="linkInput" class="parse-input ${single ? 'single' : ''}" spellcheck="false" placeholder="${single ? 'https://www.youtube.com/watch?v=…' : 'https://www.youtube.com/watch?v=…&#10;https://youtu.be/…'}">${safe(state.draftLink)}</textarea>
+    <textarea id="linkInput" class="parse-input ${single ? 'single' : ''}" spellcheck="false" placeholder="${single ? 'https://www.youtube.com/watch?v=…' : 'https://www.youtube.com/watch?v=…&#10;https://www.bilibili.com/video/BV…'}">${safe(state.draftLink)}</textarea>
     <div class="field-hint">每行一个链接；支持视频、短链、播放列表与直播回放</div>
     <div class="parse-actions">
       <button class="btn btn-ghost" id="pasteLinks">${icon('clipboard', 15)}粘贴链接</button>
@@ -352,6 +355,12 @@ function renderAddView() {
       <span class="support-item">${icon('layers', 14)}播放列表</span>
       <span class="support-item">${icon('broadcast', 14)}直播回放</span>
       <span class="support-item">${icon('log', 14)}多行批量</span>
+    </div>
+    <div class="sites-note">
+      <div class="sites-head"><b>支持的站点</b><span>下载内核为 yt-dlp，只要它支持，这里多半也能下</span></div>
+      <div class="sites-group"><span class="sites-label">视频</span><p>YouTube、哔哩哔哩、抖音、西瓜视频、优酷、爱奇艺、腾讯视频、芒果TV、微博、TikTok、Twitter/X、Instagram、Facebook、Vimeo、Twitch、Reddit、Dailymotion</p></div>
+      <div class="sites-group"><span class="sites-label">音乐</span><p>SoundCloud、Bandcamp、网易云音乐、QQ音乐</p></div>
+      <p class="sites-caveat">yt-dlp 支持 1700 多个站点，上面只是常见示例。站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入</p>
     </div>
   </div>`
 }
@@ -466,6 +475,22 @@ function renderSettings() {
   `
 }
 
+// renderCookiePlatformRow 渲染分站点 Cookies 的一行：站点名 + 导入状态 + 导入/移除。
+function renderCookiePlatformRow(p) {
+  const busy = state.cookieBusy === p.id
+  const imported = !!p.imported
+  const detail = imported
+    ? `已导入 · ${p.count} 条${p.updatedAt ? ` · ${p.updatedAt} 更新` : ''}`
+    : '未导入'
+  return `<div class="row-split cookie-plat">
+    <div class="row-split-copy"><b>${safe(p.name)}</b><small class="${imported ? 'ok' : ''}">${safe(detail)}</small></div>
+    <div class="cookie-plat-actions">
+      <button class="btn btn-ghost btn-sm" data-cookie-import="${safe(p.id)}" ${busy ? 'disabled' : ''}>${busy ? '处理中…' : (imported ? '重新导入' : '导入')}</button>
+      ${imported ? `<button class="btn btn-ghost btn-sm" data-cookie-remove="${safe(p.id)}" ${busy ? 'disabled' : ''}>移除</button>` : ''}
+    </div>
+  </div>`
+}
+
 function renderSettingsSection(id) {
   if (id === 'location') {
     return `
@@ -555,11 +580,16 @@ function renderSettingsSection(id) {
               <div class="hint ${state.browserRunning ? 'warn' : ''}" id="browserRunningHint" style="margin-top:10px">${state.browserRunning ? safe(state.cookieBrowser) + ' 正在运行 —— 读取 Cookies 会失败，请彻底退出后再试' : '此方式需完全退出浏览器(含后台进程)后使用'}</div>
             </div>
             <div class="${state.cookieSource === 'file' ? '' : 'hidden'}" id="cookieSourceFile">
-              <div class="path-field">
-                <div class="path-input">${icon('file', 15)}<input id="cookieFilePath" value="${safe(state.cookieFile)}" placeholder="选择导出的 cookies.txt 文件" /></div>
-                <button class="btn btn-ghost" id="browseCookieFile">浏览…</button>
+              <div class="cookie-plat-list">
+                ${state.cookiePlatforms.map(renderCookiePlatformRow).join('')}
               </div>
-              <div class="hint" style="margin-top:10px">用浏览器扩展(如 Get cookies.txt)导出 Netscape 格式的 cookies.txt 文件</div>
+              <div class="hint" style="margin-top:10px">用浏览器扩展(如 Get cookies.txt)导出 Netscape 格式的 cookies.txt，导入时自动识别站点，分别存到程序数据目录，下载时按链接自动选用</div>
+              <div class="cookie-plat-foot">
+                <span class="hint">其他站点</span>
+                <div class="path-input">${icon('file', 15)}<input id="cookieFilePath" value="${safe(state.cookieFile)}" placeholder="可选的通用 cookies.txt" /></div>
+                <button class="btn btn-ghost" id="browseCookieFile">浏览…</button>
+                <button class="btn btn-ghost" id="openCookieFolder">打开目录</button>
+              </div>
             </div>
           </div>
         </div>
@@ -664,7 +694,7 @@ function renderAbout() {
         <div>
           <div class="about-overline">DESKTOP DOWNLOAD TOOL</div>
           <h1 class="about-title">DownTube</h1>
-          <p class="about-desc">一个专注本地下载与任务管理的 YouTube 桌面工具</p>
+          <p class="about-desc">一个专注本地下载与任务管理的 YouTube 桌面工具，又不仅限于 YouTube</p>
         </div>
       </div>
       <div class="about-divider"></div>
@@ -845,7 +875,7 @@ root.addEventListener('click', event => {
       state.enterAnim = true
       scrollReset = true
       state.page = page
-      if (page === 'settings') { captureSettingsBaseline(); refreshBrowserRunning() }
+      if (page === 'settings') { captureSettingsBaseline(); refreshBrowserRunning(); refreshCookieStatus() }
       render()
     }
     return
@@ -878,6 +908,11 @@ root.addEventListener('click', event => {
   // Cookies 来源 tab
   const cookieTab = event.target.closest('[data-cookie-source]')
   if (cookieTab) { setCookieSource(cookieTab.dataset.cookieSource); return }
+  // 分站点 Cookies 导入/移除
+  const cookieImport = event.target.closest('[data-cookie-import]')
+  if (cookieImport) { importPlatformCookie(cookieImport.dataset.cookieImport); return }
+  const cookieRemove = event.target.closest('[data-cookie-remove]')
+  if (cookieRemove) { removePlatformCookie(cookieRemove.dataset.cookieRemove); return }
   // 自定义下拉
   const trigger = event.target.closest('.select-trigger')
   if (trigger) {
@@ -979,6 +1014,7 @@ function bind() {
   document.querySelector('#saveSettings')?.addEventListener('click', saveSettings)
   document.querySelector('#browseFolder')?.addEventListener('click', browse)
   document.querySelector('#browseCookieFile')?.addEventListener('click', browseCookieFile)
+  document.querySelector('#openCookieFolder')?.addEventListener('click', () => backend()?.OpenCookieFolder?.())
   document.querySelector('#folderPath')?.addEventListener('change', e => { state.folder = e.target.value; state.settingsDirty = true })
   document.querySelector('#cookieFilePath')?.addEventListener('change', e => { state.cookieFile = e.target.value; state.settingsDirty = true })
   document.querySelector('#highFrameRate')?.addEventListener('change', e => { state.highFrameRate = e.target.checked; state.settingsDirty = true })
@@ -1331,6 +1367,74 @@ function setCookieSource(source) {
   document.querySelector('#cookieSourceBrowser')?.classList.toggle('hidden', source !== 'browser')
   document.querySelector('#cookieSourceFile')?.classList.toggle('hidden', source !== 'file')
   if (source === 'browser') refreshBrowserRunning()
+  else refreshCookieStatus()
+}
+
+// refreshCookieStatus 拉取各站点已导入的 Cookies 状态。
+async function refreshCookieStatus() {
+  const api = backend()
+  if (!api?.CookieStatus) return
+  try {
+    const status = await api.CookieStatus()
+    state.cookiePlatforms = Array.isArray(status?.platforms) ? status.platforms : []
+    state.cookieDir = status?.dir || ''
+    patchCookiePlatforms()
+  } catch { /* 读取失败时保持现状 */ }
+}
+
+// patchCookiePlatforms 只替换分站点列表，避免整页重绘打断正在编辑的输入框。
+function patchCookiePlatforms() {
+  const list = document.querySelector('.cookie-plat-list')
+  if (!list) return
+  list.innerHTML = state.cookiePlatforms.map(renderCookiePlatformRow).join('')
+}
+
+// importPlatformCookie 选择一个 cookies.txt，由后端识别站点并分别保存。
+async function importPlatformCookie(platformId) {
+  const api = backend()
+  if (!api?.ImportPlatformCookie) { toast('桌面版中可使用文件选择器'); return }
+  state.cookieBusy = platformId || ''
+  patchCookiePlatforms()
+  try {
+    const result = await api.ImportPlatformCookie()
+    if (!result || result.canceled) { state.cookieBusy = ''; patchCookiePlatforms(); return }
+    if (!result.ok) {
+      toast(result.message || '导入失败')
+      state.cookieBusy = ''
+      patchCookiePlatforms()
+      return
+    }
+    const saved = Array.isArray(result.saved) ? result.saved : []
+    state.cookieBusy = ''
+    await refreshCookieStatus()
+    const summary = saved.map(item => `${item.name} ${item.count} 条`).join('、')
+    const dropped = Number(result.dropped) || 0
+    toast(`已保存 ${summary}${dropped ? `，忽略了 ${dropped} 条其他站点的 Cookie` : ''}`)
+  } catch (error) {
+    state.cookieBusy = ''
+    patchCookiePlatforms()
+    toast(`导入失败：${error.message}`)
+  }
+}
+
+// removePlatformCookie 删除某个站点已保存的 Cookies。
+async function removePlatformCookie(platformId) {
+  const api = backend()
+  if (!api?.RemovePlatformCookie) return
+  const target = state.cookiePlatforms.find(p => p.id === platformId)
+  state.cookieBusy = platformId
+  patchCookiePlatforms()
+  try {
+    const result = await api.RemovePlatformCookie(platformId)
+    state.cookieBusy = ''
+    if (!result?.ok) { toast(result?.message || '移除失败'); patchCookiePlatforms(); return }
+    await refreshCookieStatus()
+    toast(`已移除 ${target?.name || ''} 的 Cookies`)
+  } catch (error) {
+    state.cookieBusy = ''
+    patchCookiePlatforms()
+    toast(`移除失败：${error.message}`)
+  }
 }
 
 async function refreshBrowserRunning() {

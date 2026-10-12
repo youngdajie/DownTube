@@ -538,6 +538,24 @@ h1, h2, h3, p { margin: 0; }
 .support-item { display: inline-flex; align-items: center; gap: 6px; }
 .support-item svg { color: var(--text-3); }
 
+/* ---------- 下载页:支持站点说明 ---------- */
+.sites-note {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.sites-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 10px; }
+.sites-head b { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.sites-head span { font-size: 11.5px; color: var(--text-3); }
+.sites-group { display: flex; gap: 10px; font-size: 12px; line-height: 1.7; color: var(--text-2); }
+.sites-group + .sites-group { margin-top: 3px; }
+.sites-group p { margin: 0; }
+.sites-label { flex: none; width: 32px; font-size: 11.5px; color: var(--text-3); }
+.sites-caveat { margin: 10px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--text-3); }
+.sites-caveat b { font-weight: 600; color: var(--text-2); }
+
 /* ---------- 下载页:任务列表 ---------- */
 .queue-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .queue-table th {
@@ -817,6 +835,21 @@ h1, h2, h3, p { margin: 0; }
 }
 .cookie-tab:hover { background: var(--surface-3); color: var(--text); }
 .cookie-tab.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.cookie-plat-list { display: grid; }
+.cookie-plat { min-height: 40px; border-bottom: 1px solid var(--border); }
+.cookie-plat:last-child { border-bottom: 0; }
+.cookie-plat-actions { display: flex; flex: none; gap: 8px; }
+.row-split-copy small.ok { color: var(--success); }
+.cookie-plat-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.cookie-plat-foot .path-input { flex: 1 1 200px; min-width: 0; }
 .hint { font-size: 11.5px; color: var(--text-3); line-height: 1.65; }
 .hint.warn { color: var(--warning); }
 .proxy-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

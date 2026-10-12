@@ -408,25 +408,31 @@ func errorText(err error) string {
 }
 
 // appendNetworkArgs 追加代理与 Cookies 参数（下载与标题解析共用）。
-func appendNetworkArgs(args []string, settings Settings) []string {
+// targetURL 决定用哪一份 Cookies:YouTube 与哔哩哔哩各存一份,按链接自动选。
+func (a *App) appendNetworkArgs(args []string, settings Settings, targetURL string) []string {
 	if settings.UseProxy && settings.ProxyURL != "" {
 		args = append(args, "--proxy", settings.ProxyURL)
 	}
-	if settings.UseBrowserCookie {
-		if settings.CookieSource == "file" {
-			// 明确选择"从文件导入"时只用文件;没选文件就不带 cookies,
-			// 不悄悄回退到浏览器方式,避免用错身份导致下载异常。
-			if settings.CookieFile != "" {
-				args = append(args, "--cookies", settings.CookieFile)
-			}
-		} else {
-			browserName := strings.ToLower(settings.CookieBrowser)
-			if browserName == "microsoft edge" {
-				browserName = "edge"
-			}
-			args = append(args, "--cookies-from-browser", browserName)
-		}
+	if !settings.UseBrowserCookie {
+		return args
 	}
+	if settings.CookieSource == "file" {
+		// 明确选择"从文件导入"时只用文件;没选文件就不带 cookies,
+		// 不悄悄回退到浏览器方式,避免用错身份导致下载异常。
+		if path := platformCookieFile(targetURL); path != "" {
+			args = append(args, "--cookies", path)
+			return args
+		}
+		if settings.CookieFile != "" {
+			args = append(args, "--cookies", settings.CookieFile)
+		}
+		return args
+	}
+	browserName := strings.ToLower(settings.CookieBrowser)
+	if browserName == "microsoft edge" {
+		browserName = "edge"
+	}
+	args = append(args, "--cookies-from-browser", browserName)
 	return args
 }
 
@@ -438,7 +444,7 @@ func (a *App) fetchTitle(url string) string {
 	}
 	settings := a.GetSettings()
 	args := []string{"--skip-download", "--no-warnings", "--no-playlist", "--socket-timeout", "15", "--print", "%(title)j"}
-	args = appendNetworkArgs(args, settings)
+	args = a.appendNetworkArgs(args, settings, url)
 	args = append(args, url)
 	for attempt := 0; attempt < 2; attempt++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -913,7 +919,7 @@ func (a *App) runTask(ctx context.Context, id int, engine string, task Task) {
 	}
 	// "视频（带音频）"会下载两路流并合并为单文件:仅在此时校验同名旧文件是否带音轨
 	wantsAudioMerge := !audioOnly && settings.DownloadType != "仅视频" && ffmpegErr == nil
-	args = appendNetworkArgs(args, settings)
+	args = a.appendNetworkArgs(args, settings, task.URL)
 	if ffmpegErr == nil {
 		args = append(args, "--ffmpeg-location", ffmpegPath)
 	}
@@ -2094,8 +2100,8 @@ func repairCookieFile(filePath string) (string, error) {
 		changed = true
 		notes = append(notes, "已补全 Netscape 文件头")
 	}
-	if !strings.Contains(string(data), "youtube.com") {
-		notes = append(notes, "里面没有 youtube.com 的 cookies，可能无法用于登录验证")
+	if len(cookieDomainsIn(string(data))) == 0 {
+		notes = append(notes, "没有解析到 cookie 数据行，请确认导出内容")
 	}
 	if changed {
 		if err := os.WriteFile(filePath, data, 0o600); err != nil {

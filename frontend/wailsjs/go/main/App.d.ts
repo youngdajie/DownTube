@@ -10,6 +10,8 @@ export function CheckUpdate(arg1:string):Promise<Record<string, any>>;
 
 export function ClearTasks():Promise<main.Snapshot>;
 
+export function CookieStatus():Promise<Record<string, any>>;
+
 export function DownloadUpdate(arg1:string,arg2:string):Promise<Record<string, any>>;
 
 export function GetHEVCEncoderStatus():Promise<Record<string, any>>;
@@ -22,6 +24,8 @@ export function GetTasks():Promise<Array<main.Task>>;
 
 export function ImportFFmpegArchive():Promise<Record<string, any>>;
 
+export function ImportPlatformCookie():Promise<Record<string, any>>;
+
 export function InstallFFmpeg():Promise<Record<string, any>>;
 
 export function InstallUpdate(arg1:string):Promise<Record<string, any>>;
@@ -29,6 +33,8 @@ export function InstallUpdate(arg1:string):Promise<Record<string, any>>;
 export function OpenBilibili():Promise<void>;
 
 export function OpenCNBRepo():Promise<void>;
+
+export function OpenCookieFolder():Promise<void>;
 
 export function OpenDataFolder():Promise<void>;
 
@@ -49,6 +55,8 @@ export function OpenUpdatePage(arg1:string):Promise<void>;
 export function PauseAllTasks():Promise<main.Snapshot>;
 
 export function PauseTask(arg1:number):Promise<main.Snapshot>;
+
+export function RemovePlatformCookie(arg1:string):Promise<Record<string, any>>;
 
 export function RemoveTask(arg1:number):Promise<main.Snapshot>;
 

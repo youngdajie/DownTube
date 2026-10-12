@@ -18,6 +18,10 @@ export function ClearTasks() {
   return window['go']['main']['App']['ClearTasks']();
 }
 
+export function CookieStatus() {
+  return window['go']['main']['App']['CookieStatus']();
+}
+
 export function DownloadUpdate(arg1, arg2) {
   return window['go']['main']['App']['DownloadUpdate'](arg1, arg2);
 }
@@ -42,6 +46,10 @@ export function ImportFFmpegArchive() {
   return window['go']['main']['App']['ImportFFmpegArchive']();
 }
 
+export function ImportPlatformCookie() {
+  return window['go']['main']['App']['ImportPlatformCookie']();
+}
+
 export function InstallFFmpeg() {
   return window['go']['main']['App']['InstallFFmpeg']();
 }
@@ -56,6 +64,10 @@ export function OpenBilibili() {
 
 export function OpenCNBRepo() {
   return window['go']['main']['App']['OpenCNBRepo']();
+}
+
+export function OpenCookieFolder() {
+  return window['go']['main']['App']['OpenCookieFolder']();
 }
 
 export function OpenDataFolder() {
@@ -96,6 +108,10 @@ export function PauseAllTasks() {
 
 export function PauseTask(arg1) {
   return window['go']['main']['App']['PauseTask'](arg1);
+}
+
+export function RemovePlatformCookie(arg1) {
+  return window['go']['main']['App']['RemovePlatformCookie'](arg1);
 }
 
 export function RemoveTask(arg1) {
