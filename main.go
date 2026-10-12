@@ -549,22 +549,19 @@ func (a *App) GetTasks() []Task { return a.Snapshot().Tasks }
 
 func (a *App) GetSettings() Settings { return a.Snapshot().Settings }
 
-func normalizeYouTubeURL(raw string) (string, error) {
+// normalizeVideoURL 校验并规范化用户粘贴的链接。
+// 下载内核是 yt-dlp,支持 1700 多个站点,没法逐一列举域名,所以只做粗筛:
+// 必须是 http/https 链接、主机名带点。具体能不能下载交给 yt-dlp 判断,
+// 失败时它会给出对应站点的错误信息(见 transcriptHints)。
+// 限定协议顺带挡掉了形如 --xxx 的字符串被当成 yt-dlp 命令行参数的情况。
+func normalizeVideoURL(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	u, err := url.ParseRequestURI(raw)
 	if err != nil || u == nil || (u.Scheme != "https" && u.Scheme != "http") {
 		return "", fmt.Errorf("不是有效的 HTTP/HTTPS 链接")
 	}
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host != "youtube.com" && host != "www.youtube.com" && host != "m.youtube.com" && host != "youtu.be" && host != "www.youtu.be" {
-		return "", fmt.Errorf("只支持 youtube.com 和 youtu.be 链接")
-	}
-	if host == "youtu.be" || host == "www.youtu.be" {
-		if strings.Trim(u.Path, "/") == "" {
-			return "", fmt.Errorf("链接中没有视频 ID")
-		}
-	} else if u.Path != "/watch" && !strings.HasPrefix(u.Path, "/shorts/") && !strings.HasPrefix(u.Path, "/live/") && !strings.HasPrefix(u.Path, "/playlist") && !strings.HasPrefix(u.Path, "/embed/") {
-		return "", fmt.Errorf("链接不是视频、直播或播放列表地址")
+	if !strings.Contains(strings.TrimSuffix(u.Hostname(), "."), ".") {
+		return "", fmt.Errorf("链接里没有有效的域名")
 	}
 	return u.String(), nil
 }
@@ -574,7 +571,7 @@ func (a *App) AddLinks(input string) Snapshot {
 	parts := strings.FieldsFunc(input, func(r rune) bool { return r == '\n' || r == '\r' || r == '\t' || r == ' ' || r == ',' || r == ';' })
 	jobs := []titleJob{}
 	for _, raw := range parts {
-		link, err := normalizeYouTubeURL(raw)
+		link, err := normalizeVideoURL(raw)
 		if err != nil {
 			continue
 		}
@@ -1825,6 +1822,9 @@ func transcriptHints(detail string, settings Settings, ffmpegMissing bool) strin
 	}
 	if has("Unable to open cookie file") || has("unable to read cookie file") || (has("cookie") && has("No such file")) {
 		add("Cookies 文件不存在或无法读取，请在设置中重新选择")
+	}
+	if has("Unsupported URL") || has("No video formats found") {
+		add("这个链接 yt-dlp 不支持，或该页面不是视频页；可在下载页查看常见支持站点")
 	}
 	if has("Video unavailable") {
 		add("视频不可用，可能已被删除或设为私享")

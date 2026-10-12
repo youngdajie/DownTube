@@ -76,7 +76,7 @@ const FFMPEG_MIRRORS = [
 const SETTINGS_SECTIONS = [
   { id: 'location', icon: 'folder', title: '下载位置', sub: '保存目录与完成后行为', desc: '视频文件保存到哪里，以及下载完成后要做什么' },
   { id: 'format', icon: 'sliders', title: '画质与格式', sub: '默认清晰度与内容类型', desc: '默认下载的视频清晰度、内容类型与帧率偏好' },
-  { id: 'network', icon: 'globe', title: '网络与代理', sub: '代理连接与连通性检测', desc: '通过代理连接 YouTube，并在启动时检测可用性' },
+  { id: 'network', icon: 'globe', title: '网络与代理', sub: '代理连接与连通性检测', desc: '通过代理访问站点，并在启动时检测可用性' },
   { id: 'cookies', icon: 'key', title: 'Cookies', sub: '浏览器验证与文件导入', desc: '下载需要登录或年龄验证的视频时，提供 Cookies' },
   { id: 'engine', icon: 'cpu', title: '下载引擎', sub: 'yt-dlp、FFmpeg 与程序数据', desc: '下载所依赖的本地组件，以及程序数据的存放位置' },
 ]
@@ -170,10 +170,14 @@ function notesForDisplay(raw) {
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
-const isYouTubeURL = (raw) => {
+// isSupportedURL 粗筛粘贴的内容像不像能交给 yt-dlp 的链接。
+// yt-dlp 支持 1700 多个站点,没法逐一列举域名,这里只做格式判断;
+// 具体能不能下载由解析阶段决定,失败时会给出对应站点的提示。
+const isSupportedURL = (raw) => {
   try {
     const u = new URL(raw)
-    return ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'www.youtu.be'].includes(u.hostname)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+    return u.hostname.includes('.')
   } catch { return false }
 }
 const shortURL = (url) => String(url || '').replace(/^https?:\/\//, '').replace(/\/$/, '')
@@ -409,7 +413,7 @@ function renderQueueView() {
 
 function renderTable(list) {
   if (!state.tasks.length) {
-    return `<div class="empty"><span class="empty-icon">${icon('video', 22)}</span><b>队列还是空的</b><p>在「添加链接」里粘贴 YouTube 链接，任务会显示在这里</p></div>`
+    return `<div class="empty"><span class="empty-icon">${icon('video', 22)}</span><b>队列还是空的</b><p>在「添加链接」里粘贴链接，任务会显示在这里</p></div>`
   }
   if (!list.length) {
     return `<div class="empty"><span class="empty-icon">${icon('search', 22)}</span><b>没有匹配的任务</b><p>试试其他关键词</p></div>`
@@ -542,7 +546,7 @@ function renderSettingsSection(id) {
   if (id === 'network') {
     return `
       <div class="set-card">
-        <div class="set-card-head"><b>代理连接</b><p>通过本机代理访问 YouTube，适用于网络受限的环境</p></div>
+        <div class="set-card-head"><b>代理连接</b><p>通过本机代理访问站点，适用于网络受限的环境</p></div>
         <div class="set-card-body">
           <div class="row-split">
             <div class="row-split-copy"><b>使用代理</b><small>下载与解析均通过指定代理连接</small></div>
@@ -1081,7 +1085,7 @@ async function parseLinks() {
   const input = document.querySelector('#linkInput')
   const raw = (state.draftLink || '').trim()
   const parts = raw.split(/[\n\r\t ,;]+/).map(s => s.trim()).filter(Boolean)
-  const urls = parts.filter(isYouTubeURL)
+  const urls = parts.filter(isSupportedURL)
   let list = urls
   if (state.linkMode === 'single') {
     if (urls.length > 1) toast('单个视频模式只解析第一条链接')
@@ -1090,7 +1094,7 @@ async function parseLinks() {
   if (!list.length) {
     input?.classList.add('invalid')
     input?.focus()
-    toast('没有找到有效的 YouTube 链接')
+    toast('没有找到可下载的链接，请检查粘贴的内容')
     return
   }
   let snapshot
