@@ -139,9 +139,10 @@ V*:
               exit 1
             fi
 
-            # 文件名 = 安装包-版本号-流水线编号：
-            # 同一版本号重跑不会互相覆盖，看文件名就知道是哪一次构建出来的
-            SETUP_DST="build/bin/DownTube-Setup-${VERSION}-${CNB_BUILD_ID}.exe"
+            # 文件名固定为「安装包-版本号」：应用内自动更新靠它构造下载地址
+            #   /releases/download/V<版本>/DownTube-Setup-<版本>.exe
+            # 同名重跑不会冲突 —— 上面建版本时已把旧版本连附件一起删掉重建。
+            SETUP_DST="build/bin/DownTube-Setup-${VERSION}.exe"
             mv "$SETUP_SRC" "$SETUP_DST"
 
             echo "=== 产物 ==="

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os/exec"
 	"syscall"
 	"unsafe"
@@ -13,7 +14,44 @@ var (
 	procCreateMutexW = kernel32DLL.NewProc("CreateMutexW")
 	user32DLL        = syscall.NewLazyDLL("user32.dll")
 	procMessageBoxW  = user32DLL.NewProc("MessageBoxW")
+	shell32DLL       = syscall.NewLazyDLL("shell32.dll")
+	procShellExecute = shell32DLL.NewProc("ShellExecuteW")
 )
+
+const (
+	swShowNormal   = 1
+	shellExecError = 32 // ShellExecuteW 返回值 <= 32 表示失败
+)
+
+// launchInstallerElevated 以管理员权限启动安装包(会弹 UAC 确认),
+// 用 ShellExecuteW + "runas" 实现 —— exec.Command 无法触发提权。
+func launchInstallerElevated(path string) error {
+	verb, err := syscall.UTF16PtrFromString("runas")
+	if err != nil {
+		return err
+	}
+	file, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	// 静默安装:不弹安装向导,安装完成后由 NSIS 脚本自动重启应用。
+	params, err := syscall.UTF16PtrFromString("/S")
+	if err != nil {
+		return err
+	}
+	ret, _, _ := procShellExecute.Call(
+		0,
+		uintptr(unsafe.Pointer(verb)),
+		uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(params)),
+		0,
+		swShowNormal,
+	)
+	if ret <= shellExecError {
+		return errors.New("启动安装程序失败,可能取消了管理员授权")
+	}
+	return nil
+}
 
 // hideConsoleWindow 让子进程不弹出控制台窗口。
 // yt-dlp / ffmpeg 都是控制台程序，直接 exec 会闪出一个黑框，

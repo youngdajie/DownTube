@@ -110,8 +110,10 @@ jobs:
             exit 1
           fi
 
-          # 文件名 = 安装包-版本号-运行编号：同名版本重跑不会互相覆盖
-          SETUP_DST="build/bin/DownTube-Setup-${VERSION}-${GITHUB_RUN_NUMBER}.exe"
+          # 文件名固定为「安装包-版本号」：应用内自动更新靠它构造下载地址
+          #   /releases/download/V<版本>/DownTube-Setup-<版本>.exe
+          # 同名重跑不会冲突 —— 发版时已把旧 Release 连附件一起删掉重建。
+          SETUP_DST="build/bin/DownTube-Setup-${VERSION}.exe"
           mv "$SETUP_SRC" "$SETUP_DST"
           ls -lh build/bin/
 

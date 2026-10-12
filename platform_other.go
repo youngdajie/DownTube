@@ -2,7 +2,10 @@
 
 package main
 
-import "os/exec"
+import (
+	"errors"
+	"os/exec"
+)
 
 // hideConsoleWindow 在非 Windows 平台是空操作。
 // 存在的意义是让 main.go 能在 Linux 构建节点上完成 wails 的绑定生成
@@ -16,3 +19,8 @@ func acquireSingleInstance() (func(), bool) {
 
 // showAlreadyRunningDialog 在非 Windows 平台没有可弹的原生对话框。
 func showAlreadyRunningDialog() {}
+
+// launchInstallerElevated 应用内更新仅支持 Windows。
+func launchInstallerElevated(_ string) error {
+	return errors.New("当前平台不支持应用内更新")
+}

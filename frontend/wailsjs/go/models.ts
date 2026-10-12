@@ -14,6 +14,10 @@ export namespace main {
 	    ffmpegPath: string;
 	    highFrameRate: boolean;
 	    openOnComplete: boolean;
+	    maxConcurrent: number;
+	    autoRetry: number;
+	    videoCodec: string;
+	    hevcEncoder: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -34,6 +38,10 @@ export namespace main {
 	        this.ffmpegPath = source["ffmpegPath"];
 	        this.highFrameRate = source["highFrameRate"];
 	        this.openOnComplete = source["openOnComplete"];
+	        this.maxConcurrent = source["maxConcurrent"];
+	        this.autoRetry = source["autoRetry"];
+	        this.videoCodec = source["videoCodec"];
+	        this.hevcEncoder = source["hevcEncoder"];
 	    }
 	}
 	export class Task {
@@ -41,6 +49,7 @@ export namespace main {
 	    url: string;
 	    title: string;
 	    status: string;
+	    phase?: string;
 	    progress: number;
 	    quality: string;
 	    // Go type: time
@@ -57,6 +66,7 @@ export namespace main {
 	        this.url = source["url"];
 	        this.title = source["title"];
 	        this.status = source["status"];
+	        this.phase = source["phase"];
 	        this.progress = source["progress"];
 	        this.quality = source["quality"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);

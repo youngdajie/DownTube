@@ -94,21 +94,22 @@ type Store struct {
 }
 
 type App struct {
-	ctx              context.Context
-	mu               sync.Mutex
-	store            Store
-	storePath        string
-	workers          map[int]context.CancelFunc
-	retryAttempts    map[int]int
-	bestProgress     map[int]int
-	autoRun          bool
-	ffmpegInstalling bool
-	disableEvents    bool
-	titleJobs        chan struct{}
-	hevcMu           sync.Mutex
-	hevcProbed       bool
-	hevcProbedFor    string
-	hevcGPU          *hevcEncoderSpec
+	ctx               context.Context
+	mu                sync.Mutex
+	store             Store
+	storePath         string
+	workers           map[int]context.CancelFunc
+	retryAttempts     map[int]int
+	bestProgress      map[int]int
+	autoRun           bool
+	ffmpegInstalling  bool
+	updateDownloading bool
+	disableEvents     bool
+	titleJobs         chan struct{}
+	hevcMu            sync.Mutex
+	hevcProbed        bool
+	hevcProbedFor     string
+	hevcGPU           *hevcEncoderSpec
 }
 
 type titleJob struct {
@@ -848,7 +849,7 @@ func (a *App) scheduleRetry(id int, delay time.Duration) {
 		snapshot := a.snapshotLocked()
 		a.mu.Unlock()
 		a.dispatch(launches)
-			a.emit(snapshot)
+		a.emit(snapshot)
 	})
 }
 

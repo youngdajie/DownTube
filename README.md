@@ -17,6 +17,8 @@ Windows 桌面版 YouTube 下载工具。界面由 Wails + WebView2 提供，任
 - 自动检测 yt-dlp、FFmpeg 和可选代理;高画质合并及 MP3 转换需要 FFmpeg
 - WebView2 窗口使用本地打包的前端资源,无需启动浏览器服务器
 - 关于页面展示版本信息与作者链接
+- **检查更新**:启动后静默检查一次(不打扰),也可在「关于」页手动检查;有新版本时展示版本号、更新说明与来源,导航栏「关于」会亮起提示标记
+- **一键更新**:应用内直接下载安装包(CNB 优先、国内直连;失败自动切 GitHub 兜底),下载完点「立即安装」即结束程序、静默覆盖安装并自动重启到新版,全程无需手动下载和点下一步;已下载的安装包会复用,不必重复下载
 
 便携目录包含 `DownTube.exe` 和 `yt-dlp.exe`。若需要合并高画质音视频或下载 MP3,可在应用内的 FFmpeg 安装弹窗中自动下载,或从弹窗提供的加速镜像下载 `.7z` 安装包后导入;FFmpeg 未安装时,基础下载仍可使用。
 
@@ -45,6 +47,8 @@ Wails 应用在 Windows 上必须包含 `desktop` 和 `dev` 构建标签；裸�
 wails build -nsis -clean -platform windows/amd64
 ```
 
+`build/windows/installer/project.nsi` 在 Wails 模板基础上加了三段逻辑，支撑应用内一键更新，改动时注意保留：安装前先 `taskkill` 结束正在运行的旧版本（并轮询等它真正退出，超时才强杀）；静默安装（`/S`）完成后自动重启新版；文件带 UTF-8 BOM，否则含中文注释会报 `Bad text encoding`。
+
 ## 版本号与发版
 
 版本号只在 `wails.json` 的 `info.productVersion` 里写一次，三处都由它推导：
@@ -60,12 +64,25 @@ wails build -nsis -clean -platform windows/amd64
 1. 改 `wails.json` 的 `info.productVersion`（顺手同步 `frontend/package.json` 的 `version`）
 2. 版本说明写进 `docs/releases/<版本号>.md`（Release 页的正文就是它，不写就退回 tag 附注）
 3. 提交并推送到 GitHub 与 CNB
-4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.2.3 -m "1.2.3" && git push origin refs/tags/V1.2.3 && git push github refs/tags/V1.2.3`
+4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.2.4 -m "1.2.4" && git push origin refs/tags/V1.2.4 && git push github refs/tags/V1.2.4`
 
 标签格式必须是 `V` + `wails.json` 里的版本号，对不上流水线会直接红掉 ——
 这样就不会出现「安装包是 0.2.0、Release 却挂在 V0.3.0 上」的情况。
 
-之后两条流水线各自自动跑完：交叉编译 → 打 NSIS 安装包 → 在本平台建 Release（绑定同一个 `V<版本号>` 标签）→ 挂 `DownTube-Setup-<版本号>-<编号>.exe` → 删掉历史 Release 回收存储额度。CNB 侧配置在 `.cnb.yml`，GitHub 侧配置在 `.github/workflows/release.yml`；GitHub 侧还可以用 `gh workflow run release.yml` 手动触发一次「只构建、不上架」的健康检查。
+之后两条流水线各自自动跑完：交叉编译 → 打 NSIS 安装包 → 在本平台建 Release（绑定同一个 `V<版本号>` 标签）→ 挂 `DownTube-Setup-<版本号>.exe` → 删掉历史 Release 回收存储额度。CNB 侧配置在 `.cnb.yml`，GitHub 侧配置在 `.github/workflows/release.yml`；GitHub 侧还可以用 `gh workflow run release.yml` 手动触发一次「只构建、不上架」的健康检查。
+
+### 安装包命名不能随意改
+
+应用内的检查更新按固定规则拼地址，改命名会直接让老版本用户收不到更新：
+
+| 用途 | 地址 |
+| --- | --- |
+| 版本号来源（CNB） | `/-/git/raw/main/wails.json` 里的 `info.productVersion` |
+| 更新说明（CNB） | `/-/git/raw/main/docs/releases/<版本号>.md` |
+| 安装包（CNB 主源） | `/-/releases/download/V<版本号>/DownTube-Setup-<版本号>.exe` |
+| 版本号 / 说明 / 安装包（GitHub 备源） | `releases/latest` 接口 + 同名附件 |
+
+所以：安装包文件名必须保持 `DownTube-Setup-<版本号>.exe`；`docs/releases/<版本号>.md` 要在打标签前提交到 `main`（它就是更新弹窗里显示的说明）；版本号本身必须比老版本大，否则检测逻辑判定「已是最新」。应用内下载只允许来自 `cnb.cool` / `github.com` / `githubusercontent.com` 的 https 地址，白名单之外一律拒绝。
 
 标签推上去之后本地删不掉（`cnb git delete-tag` 需要 `repo-release:rw`，本地令牌没有，流水线的可信令牌才有）。这一版流水线跑挂了想重来，两条路：
 

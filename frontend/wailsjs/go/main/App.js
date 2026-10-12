@@ -10,8 +10,16 @@ export function CheckBrowserRunning(arg1) {
   return window['go']['main']['App']['CheckBrowserRunning'](arg1);
 }
 
+export function CheckUpdate(arg1) {
+  return window['go']['main']['App']['CheckUpdate'](arg1);
+}
+
 export function ClearTasks() {
   return window['go']['main']['App']['ClearTasks']();
+}
+
+export function DownloadUpdate(arg1, arg2) {
+  return window['go']['main']['App']['DownloadUpdate'](arg1, arg2);
 }
 
 export function GetHEVCEncoderStatus() {
@@ -36,6 +44,10 @@ export function ImportFFmpegArchive() {
 
 export function InstallFFmpeg() {
   return window['go']['main']['App']['InstallFFmpeg']();
+}
+
+export function InstallUpdate(arg1) {
+  return window['go']['main']['App']['InstallUpdate'](arg1);
 }
 
 export function OpenBilibili() {
@@ -72,6 +84,10 @@ export function OpenHomepage() {
 
 export function OpenProjectRepo() {
   return window['go']['main']['App']['OpenProjectRepo']();
+}
+
+export function OpenUpdatePage(arg1) {
+  return window['go']['main']['App']['OpenUpdatePage'](arg1);
 }
 
 export function PauseAllTasks() {

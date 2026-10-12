@@ -128,6 +128,19 @@ const state = {
   settingsDirty: false,
   settingsBaseline: null,
   enterAnim: false,
+  /* 版本更新 */
+  updateChecking: false,
+  updateChecked: false,
+  updateHas: false,
+  updateLatest: '',
+  updateNotes: '',
+  updateUrl: '',
+  updatePageUrl: '',
+  updateSource: '',
+  updatePhase: '',
+  updateProgress: 0,
+  updateMessage: '',
+  updateError: '',
 }
 
 let scrollReset = false
@@ -138,6 +151,22 @@ window.addEventListener('unhandledrejection', event => backend()?.ReportFrontend
 
 const taskCount = () => state.tasks.length
 const safe = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+// notesForDisplay 把 Release 说明里的 Markdown 压成纯文本。
+// 更新弹窗用 pre-wrap 直接显示文本，不渲染 Markdown，压平后才不会露出 ### 和 ** 这类标记。
+function notesForDisplay(raw) {
+  return String(raw ?? '')
+    .replace(/^```[^\n]*$/gm, '')
+    .replace(/^[^\S\n]*#{1,6}[^\S\n]*DownTube[^\S\n]*[\d.]*[^\S\n]*$/im, '') // 首行标题与弹窗标题重复，去掉
+    .replace(/^[^\S\n]*#{1,6}[^\S\n]+/gm, '')
+    .replace(/^[^\S\n]*[-*+][^\S\n]+/gm, '· ')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
 const isYouTubeURL = (raw) => {
   try {
     const u = new URL(raw)
@@ -228,7 +257,7 @@ function render() {
           <nav class="nav">
             <button class="nav-item ${state.page === 'downloads' ? 'active' : ''}" data-page="downloads">${icon('download')}<span>下载队列</span><em>${state.tasks.length || ''}</em></button>
             <button class="nav-item ${state.page === 'settings' ? 'active' : ''}" data-page="settings">${icon('settings')}<span>设置</span></button>
-            <button class="nav-item ${state.page === 'about' ? 'active' : ''}" data-page="about">${icon('info')}<span>关于</span></button>
+            <button class="nav-item ${state.page === 'about' ? 'active' : ''}" data-page="about">${icon('info')}<span>关于</span>${state.updateHas ? '<i class="nav-badge"></i>' : ''}</button>
           </nav>
         </aside>
         <main class="main">
@@ -588,6 +617,45 @@ function selectControl(setting, options, value, ariaLabel) {
 }
 
 // ---------------- 关于页 ----------------
+// 更新区块:按状态渲染 —— 无更新时提示已是最新,发现新版显示版本与说明,
+// 下载中显示进度,下载完成显示安装按钮。
+function renderUpdateBlock() {
+  if (state.updateChecking && !state.updateChecked && !state.updateHas) return ''
+  if (state.updatePhase === 'downloading') {
+    const indeterminate = state.updateProgress <= 0
+    return `<div class="update-block">
+      <div class="update-block-head"><b>正在下载 v${safe(state.updateLatest)}</b><span id="updateProgressPct">${indeterminate ? '' : state.updateProgress + '%'}</span></div>
+      <div class="ff-track ${indeterminate ? 'indeterminate' : ''}"><span id="updateProgressBar" style="width:${state.updateProgress}%"></span></div>
+      <p class="update-hint" id="updateProgressLabel">${safe(state.updateMessage || '正在连接下载源…')}</p>
+    </div>`
+  }
+  if (state.updatePhase === 'downloaded' || state.updatePhase === 'installing') {
+    const installing = state.updatePhase === 'installing'
+    return `<div class="update-block ready">
+      <div class="update-block-head"><b>v${safe(state.updateLatest)} 已就绪</b></div>
+      <p class="update-hint">${installing ? '安装程序已启动，程序即将自动关闭并完成更新' : '点击「立即安装」后程序会自动关闭，安装完成后重新打开'}</p>
+      <button class="btn btn-primary btn-sm" id="installUpdateBtn" ${installing ? 'disabled' : ''}>${installing ? '正在安装…' : '立即安装并重启'}</button>
+    </div>`
+  }
+  if (state.updateHas) {
+    const source = state.updateSource === 'github' ? 'GitHub' : 'CNB'
+    return `<div class="update-block">
+      <div class="update-block-head"><b>发现新版本 v${safe(state.updateLatest)}</b><span class="update-source">来自 ${source}</span></div>
+      ${state.updateNotes ? `<div class="update-notes">${safe(notesForDisplay(state.updateNotes))}</div>` : ''}
+      ${state.updateError ? `<p class="update-hint error">${safe(state.updateError)}</p>` : ''}
+      <div class="update-actions">
+        <button class="btn btn-primary btn-sm" id="downloadUpdateBtn">下载更新</button>
+        <button class="btn btn-ghost btn-sm" id="openReleaseBtn">查看发布页</button>
+      </div>
+    </div>`
+  }
+  if (state.updateChecked) {
+    if (state.updateError) return `<p class="update-hint error">${safe(state.updateError)}</p>`
+    return `<p class="update-ok">已是最新版本</p>`
+  }
+  return ''
+}
+
 function renderAbout() {
   return `<div class="about-wrap">
     <div class="about-card">
@@ -601,9 +669,14 @@ function renderAbout() {
       </div>
       <div class="about-divider"></div>
       <div class="about-info">
-        <div class="info-row"><span>当前版本</span><b>v${APP_VERSION}</b></div>
+        <div class="info-row">
+          <span>当前版本</span>
+          <b>v${APP_VERSION}</b>
+          <button class="btn btn-ghost btn-sm update-check-btn" id="checkUpdateBtn" ${state.updateChecking ? 'disabled' : ''}>${state.updateChecking ? '检查中…' : '检查更新'}</button>
+        </div>
         <div class="info-row"><span>应用名称</span><b>DownTube</b></div>
       </div>
+      <div id="updateArea">${renderUpdateBlock()}</div>
       <h3 class="about-links-title">作者链接</h3>
       <div class="link-list">
         <div class="link-row">
@@ -934,6 +1007,15 @@ function bind() {
   document.querySelector('#linkBilibili')?.addEventListener('click', () => backend()?.OpenBilibili?.())
   document.querySelector('#linkHomepage')?.addEventListener('click', () => backend()?.OpenHomepage?.())
 
+  // 版本更新
+  document.querySelector('#checkUpdateBtn')?.addEventListener('click', () => checkUpdate(true))
+  document.querySelector('#downloadUpdateBtn')?.addEventListener('click', downloadUpdate)
+  document.querySelector('#installUpdateBtn')?.addEventListener('click', installUpdate)
+  document.querySelector('#openReleaseBtn')?.addEventListener('click', () => {
+    const url = state.updatePageUrl || state.updateUrl
+    if (url) backend()?.OpenUpdatePage?.(url)
+  })
+
   // FFmpeg 弹窗
   document.querySelector('#closeFFmpegModal')?.addEventListener('click', closeFFmpegModal)
   document.querySelector('#ffmpegModalCancel')?.addEventListener('click', closeFFmpegModal)
@@ -1053,6 +1135,129 @@ async function openDataFolder() {
   if (backend()?.OpenDataFolder) {
     try { await backend().OpenDataFolder() } catch (error) { toast(`无法打开数据目录：${error.message}`) }
   } else toast('请在桌面版中打开数据目录')
+}
+
+// ============================================================
+// 版本更新
+// ============================================================
+async function checkUpdate(manual) {
+  const api = backend()
+  if (!api?.CheckUpdate) { if (manual) toast('请在桌面版中检查更新'); return }
+  if (state.updateChecking) return
+  state.updateChecking = true
+  renderUpdateArea()
+  try {
+    const result = await api.CheckUpdate(APP_VERSION)
+    state.updateChecking = false
+    state.updateChecked = true
+    if (!result?.ok) {
+      state.updateHas = false
+      state.updateError = result?.error || '检查更新失败'
+      if (manual) toast(state.updateError)
+    } else if (result.hasUpdate) {
+      const versionChanged = state.updateLatest && state.updateLatest !== result.latest
+      if (versionChanged) { state.updatePhase = ''; state.updateProgress = 0 }
+      state.updateHas = true
+      state.updateLatest = result.latest || ''
+      state.updateNotes = result.notes || ''
+      state.updateUrl = result.url || ''
+      state.updatePageUrl = result.pageUrl || ''
+      state.updateSource = result.source || ''
+      state.updateError = ''
+      if (manual) toast(`发现新版本 v${result.latest}`)
+    } else {
+      state.updateHas = false
+      state.updateError = ''
+      if (manual) toast(`已是最新版本 v${APP_VERSION}`)
+    }
+  } catch (error) {
+    state.updateChecking = false
+    state.updateChecked = true
+    state.updateHas = false
+    state.updateError = error.message || '检查更新失败'
+    if (manual) toast(`检查更新失败：${state.updateError}`)
+  }
+  markUpdateBadge()
+  renderUpdateArea()
+}
+
+async function downloadUpdate() {
+  const api = backend()
+  if (!api?.DownloadUpdate || !state.updateUrl) return
+  state.updatePhase = 'downloading'
+  state.updateProgress = 0
+  state.updateMessage = '正在连接下载源…'
+  state.updateError = ''
+  renderUpdateArea()
+  try {
+    const result = await api.DownloadUpdate(state.updateUrl, state.updateLatest)
+    if (result?.ok) {
+      state.updatePhase = 'downloaded'
+      state.updateProgress = 100
+      renderUpdateArea()
+      toast('更新包已下载完成')
+      return
+    }
+    state.updatePhase = ''
+    state.updateError = result?.error || '下载更新失败'
+    renderUpdateArea()
+    toast(state.updateError)
+  } catch (error) {
+    state.updatePhase = ''
+    state.updateError = error.message || '下载更新失败'
+    renderUpdateArea()
+    toast(`下载更新失败：${state.updateError}`)
+  }
+}
+
+async function installUpdate() {
+  const api = backend()
+  if (!api?.InstallUpdate) return
+  if (state.updatePhase === 'installing') return
+  state.updatePhase = 'installing'
+  state.updateError = ''
+  renderUpdateArea()
+  try {
+    const result = await api.InstallUpdate(state.updateLatest)
+    if (!result?.ok) {
+      state.updatePhase = 'downloaded'
+      state.updateError = result?.error || '无法启动安装程序'
+      renderUpdateArea()
+      toast(state.updateError)
+      return
+    }
+    // 安装程序已启动:安装包会结束本进程,完成后自动重启新版
+    state.updatePhase = 'installing'
+    renderUpdateArea()
+  } catch (error) {
+    state.updatePhase = 'downloaded'
+    state.updateError = error.message || '无法启动安装程序'
+    renderUpdateArea()
+    toast(`无法启动安装程序：${state.updateError}`)
+  }
+}
+
+// renderUpdateArea 只重绘关于页的更新区块,避免整页重绘打断交互。
+function renderUpdateArea() {
+  if (state.page !== 'about') return
+  const btn = document.querySelector('#checkUpdateBtn')
+  if (btn) {
+    btn.disabled = state.updateChecking
+    btn.textContent = state.updateChecking ? '检查中…' : '检查更新'
+  }
+  const block = document.querySelector('#updateArea')
+  if (!block) { render(); return }
+  block.outerHTML = `<div id="updateArea">${renderUpdateBlock()}</div>`
+  bindUpdateArea()
+}
+
+function bindUpdateArea() {
+  document.querySelector('#downloadUpdateBtn')?.addEventListener('click', downloadUpdate)
+  document.querySelector('#installUpdateBtn')?.addEventListener('click', installUpdate)
+  document.querySelector('#openReleaseBtn')?.addEventListener('click', () => {
+    const url = state.updatePageUrl || state.updateUrl
+    if (url) backend()?.OpenUpdatePage?.(url)
+  })
 }
 
 // ============================================================
@@ -1377,4 +1582,50 @@ if (window.runtime?.EventsOn) {
     if (!document.querySelector('#ffmpegProgressBar')) { render(); return }
     updateFFmpegProgressUI()
   })
+  window.runtime.EventsOn('update:progress', (data) => {
+    if (!data) return
+    if (typeof data.percent === 'number') state.updateProgress = data.percent
+    if (data.message) state.updateMessage = data.message
+    if (state.updatePhase !== 'downloading') return
+    const bar = document.querySelector('#updateProgressBar')
+    if (!bar) return
+    bar.style.width = state.updateProgress + '%'
+    const pct = document.querySelector('#updateProgressPct')
+    if (pct) pct.textContent = state.updateProgress > 0 ? state.updateProgress + '%' : ''
+    const label = document.querySelector('#updateProgressLabel')
+    if (label && state.updateMessage) label.textContent = state.updateMessage
+  })
+}
+
+// 启动后静默检查一次更新:失败不打扰,有新版本时在侧边栏「关于」加提示点。
+setTimeout(async () => {
+  const api = backend()
+  if (!api?.CheckUpdate) return
+  try {
+    const result = await api.CheckUpdate(APP_VERSION)
+    if (!result?.ok) return
+    if (result.hasUpdate) {
+      state.updateChecked = true
+      state.updateHas = true
+      state.updateLatest = result.latest || ''
+      state.updateNotes = result.notes || ''
+      state.updateUrl = result.url || ''
+      state.updatePageUrl = result.pageUrl || ''
+      state.updateSource = result.source || ''
+      markUpdateBadge()
+      if (state.page === 'about') renderUpdateArea()
+    }
+  } catch { /* 静默,忽略 */ }
+}, 2500)
+
+// markUpdateBadge 在侧边栏「关于」上加/去提示点。
+function markUpdateBadge() {
+  const nav = document.querySelector('.nav-item[data-page="about"]')
+  if (!nav) return
+  const existing = nav.querySelector('.nav-badge')
+  if (state.updateHas && !existing) {
+    nav.insertAdjacentHTML('beforeend', '<i class="nav-badge"></i>')
+  } else if (!state.updateHas && existing) {
+    existing.remove()
+  }
 }

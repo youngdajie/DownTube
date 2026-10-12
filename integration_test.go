@@ -973,3 +973,109 @@ func TestTranscodeSpecialDirChars(t *testing.T) {
 	}
 	_ = os.Remove(src)
 }
+
+// TestUpdateCheckLive 真实网络验证检查更新:CNB 或 GitHub 至少一路可用,
+// 能从低版本检测到当前最新版,且不高于最新版时正确报告「已是最新」。
+func TestUpdateCheckLive(t *testing.T) {
+	if os.Getenv("DOWNTUBE_IT") == "" {
+		t.Skip("设置 DOWNTUBE_IT=1 运行该集成测试")
+	}
+	app := &App{
+		store:         Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()},
+		workers:       make(map[int]context.CancelFunc),
+		retryAttempts: make(map[int]int),
+		bestProgress:  make(map[int]int),
+		disableEvents: true,
+		titleJobs:     make(chan struct{}, 2),
+	}
+
+	// 低版本:应检测到更新,并给出可下载地址。
+	low := app.CheckUpdate("0.0.1")
+	t.Logf("0.0.1 → ok=%v hasUpdate=%v latest=%q source=%q url=%q",
+		low["ok"], low["hasUpdate"], low["latest"], low["source"], low["url"])
+	if low["ok"] != true {
+		t.Fatalf("检查更新失败: %v", low["error"])
+	}
+	if low["hasUpdate"] != true {
+		t.Fatalf("低版本未检出更新: %v", low)
+	}
+	latest, _ := low["latest"].(string)
+	if latest == "" {
+		t.Fatal("latest 为空")
+	}
+	url, _ := low["url"].(string)
+	if !allowedUpdateHost(url) {
+		t.Fatalf("下载地址不在白名单: %q", url)
+	}
+
+	// 等于最新版:应报告已是最新。
+	same := app.CheckUpdate(latest)
+	t.Logf("当前最新版 %s → ok=%v hasUpdate=%v", latest, same["ok"], same["hasUpdate"])
+	if same["ok"] != true {
+		t.Fatalf("最新版检查失败: %v", same["error"])
+	}
+	if same["hasUpdate"] != false {
+		t.Fatalf("最新版仍报告有更新: %v", same)
+	}
+
+	// 更高版本:不应报告更新。
+	high := app.CheckUpdate("99.0.0")
+	if high["ok"] != true || high["hasUpdate"] != false {
+		t.Fatalf("高版本判断异常: %v", high)
+	}
+}
+
+// TestUpdateDownloadLive 端到端下载安装包(真实网络),校验文件为合法 PE 安装包。
+// 用 CNB 直连(国内稳定)验证下载链路;若配置了 DOWNTUBE_IT_PROXY 则同时覆盖代理分支。
+func TestUpdateDownloadLive(t *testing.T) {
+	if os.Getenv("DOWNTUBE_IT") == "" {
+		t.Skip("设置 DOWNTUBE_IT=1 运行该集成测试")
+	}
+	settings := defaultSettings()
+	if proxy := os.Getenv("DOWNTUBE_IT_PROXY"); proxy != "" {
+		settings.UseProxy = true
+		settings.ProxyURL = proxy
+	}
+	app := &App{
+		store:         Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: settings},
+		workers:       make(map[int]context.CancelFunc),
+		retryAttempts: make(map[int]int),
+		bestProgress:  make(map[int]int),
+		disableEvents: true,
+		titleJobs:     make(chan struct{}, 2),
+	}
+
+	// 取当前已发布版本的安装包地址:
+	// 优先用 check 结果(新命名);探测失败时回退到 CNB 当前 Release 的已知地址,
+	// 保证下载机制在「命名切换过渡期」也能被真实验证。
+	url := ""
+	if info := app.CheckUpdate("0.0.1"); info["ok"] == true && info["hasUpdate"] == true {
+		url, _ = info["url"].(string)
+	}
+	version := "1.2.3"
+	if url == "" || !app.remoteFileExists(url) {
+		url = "https://cnb.cool/youngdajie/downtube/-/releases/download/V1.2.3/DownTube-Setup-1.2.3-cnb-i9q-1k4ldedms.exe"
+	}
+	if !app.remoteFileExists(url) {
+		t.Skipf("找不到可下载的安装包地址: %s", url)
+	}
+
+	result := app.DownloadUpdate(url, version)
+	t.Logf("下载 %s → ok=%v size=%v error=%v", url, result["ok"], result["size"], result["error"])
+	if result["ok"] != true {
+		t.Fatalf("下载安装包失败: %v", result["error"])
+	}
+	path, _ := result["path"].(string)
+	defer func() {
+		_ = os.Remove(path)
+		_ = os.RemoveAll(filepath.Join(os.TempDir(), updateTempDir))
+	}()
+	if err := validateInstallerFile(path); err != nil {
+		t.Fatalf("安装包校验失败: %v", err)
+	}
+	info2, statErr := os.Stat(path)
+	if statErr != nil || info2.Size() < 4<<20 {
+		t.Fatalf("安装包体积异常: %v %v", statErr, info2)
+	}
+	t.Logf("安装包就绪: %s (%.1f MB)", path, float64(info2.Size())/1048576)
+}
