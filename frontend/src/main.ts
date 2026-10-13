@@ -403,6 +403,7 @@ function render() {
             <button class="nav-item ${state.page === 'toolbox' ? 'active' : ''}" data-page="toolbox">${icon('toolbox')}<span>百宝箱</span></button>
             <button class="nav-item ${state.page === 'about' ? 'active' : ''}" data-page="about">${icon('info')}<span>关于</span>${state.updateHas ? '<i class="nav-badge"></i>' : ''}</button>
           </nav>
+          <div class="sidebar-mark" aria-hidden="true"><img src="/downtube-mark.svg" alt="" /></div>
         </aside>
         <main class="main">
           <div class="content ${state.enterAnim ? 'page-enter' : ''}">
@@ -906,20 +907,14 @@ function renderToolboxFFmpeg() {
       <div class="tb-compress-opts">
         <label class="tb-field">
           <span>输出格式</span>
-          <select id="tbCompressFormat" ${state.toolboxBusy ? 'disabled' : ''}>
-            ${state.toolboxCompressFormats.map(f =>
-              `<option value="${f.id}" ${state.toolboxCompressFormat === f.id ? 'selected' : ''}>${safe(f.label)}</option>`).join('')}
-          </select>
+          ${selectControl('toolboxFormat', state.toolboxCompressFormats.map(f => ({ value: f.id, label: f.label })), state.toolboxCompressFormat, '输出格式')}
         </label>
         <label class="tb-field">
           <span>压缩率</span>
-          <select id="tbCompressQuality" ${state.toolboxBusy ? 'disabled' : ''}>
-            ${state.toolboxCompressQualities.map(q =>
-              `<option value="${q.id}" ${state.toolboxCompressQuality === q.id ? 'selected' : ''}>${safe(q.label)}</option>`).join('')}
-          </select>
+          ${selectControl('toolboxQuality', state.toolboxCompressQualities.map(q => ({ value: q.id, label: q.label })), state.toolboxCompressQuality, '压缩率')}
         </label>
         <label class="tb-switch tb-switch-inline">
-          <input type="checkbox" id="tbCompressGPU" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}>
+          <span class="switch"><input type="checkbox" id="tbCompressGPU" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}><span></span></span>
           <span>显卡加速</span>
         </label>
       </div>
@@ -930,7 +925,7 @@ function renderToolboxFFmpeg() {
     </div>
 
     <label class="tb-switch">
-      <input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}>
+      <span class="switch"><input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}><span></span></span>
       <span>显卡加速重编码（输出 H.265，文件更小）</span>
     </label>
     <p class="tb-hint">${icon('info', 13)}不勾选时是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。合并和分离本来就不需要重编码，只有想让文件变小才需要勾选</p>
@@ -1206,7 +1201,10 @@ root.addEventListener('click', event => {
     if (setting === 'autoRetry') state.autoRetry = Math.max(0, Math.min(5, parseInt(value!, 10) || 0))
     if (setting === 'videoCodec') state.videoCodec = value === 'hevc' ? 'hevc' : 'auto'
     if (setting === 'hevcEncoder') state.hevcEncoder = value === 'cpu' ? 'cpu' : 'auto'
-    state.settingsDirty = true
+    // 百宝箱的压缩下拉不是设置项,别把它们标成设置已改动
+    if (setting === 'toolboxFormat') state.toolboxCompressFormat = value
+    if (setting === 'toolboxQuality') state.toolboxCompressQuality = value
+    if (!setting || !setting.startsWith('toolbox')) state.settingsDirty = true
     select.querySelector<HTMLElement>('.select-current')!.textContent = option.querySelector<HTMLElement>('span')!.textContent
     select.querySelectorAll<HTMLElement>('.select-option').forEach(item => {
       const selected = item === option
@@ -1215,6 +1213,8 @@ root.addEventListener('click', event => {
     })
     closeSelect(select)
     if (setting === 'cookieBrowser') refreshBrowserRunning()
+    // 压缩率换了档位,下面那行说明要跟着换
+    if (setting === 'toolboxQuality') patchToolboxQualityNote()
     return
   }
   if (!(event.target as HTMLElement).closest<HTMLElement>('.md-select')) closeAllSelects()
@@ -1336,15 +1336,8 @@ function bind() {
   // 百宝箱:视频压缩
   $('#tbPickCompress')?.addEventListener('click', pickToolboxCompressVideo)
   $('#tbCompress')?.addEventListener('click', startToolboxCompress)
-  $('#tbCompressFormat')?.addEventListener('change', (e) => {
-    // 选项为空时 value 是空串,别把它写回状态
-    const v = (e.target as HTMLSelectElement).value
-    if (v) state.toolboxCompressFormat = v
-  })
-  $('#tbCompressQuality')?.addEventListener('change', (e) => {
-    const v = (e.target as HTMLSelectElement).value
-    if (v) state.toolboxCompressQuality = v
-    patchToolboxQualityNote()
+  $('#tbCompressGPU')?.addEventListener('change', (e) => {
+    state.toolboxReencode = (e.target as HTMLInputElement).checked
   })
 
   // 版本更新

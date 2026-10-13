@@ -1212,3 +1212,37 @@ h1, h2, h3, p { margin: 0; }
 .tb-field select:focus { outline: none; border-color: var(--primary); }
 .tb-field select:disabled { opacity: .55; cursor: not-allowed; }
 .tb-switch-inline { flex: none; padding-bottom: 7px; white-space: nowrap; }
+
+/* ============================================================ 侧边栏左下角装饰 */
+/* 默认虚化并压暗,鼠标移上去才清晰 —— 只做点缀,不抢导航的注意力 */
+.sidebar-mark {
+  flex: none; margin-top: auto; padding: 4px 0 2px;
+  display: grid; place-items: center;
+  pointer-events: none;          /* 不拦截点击,导航区照常可用 */
+}
+.sidebar-mark img {
+  width: 46px; height: 46px; object-fit: contain;
+  filter: blur(3px) saturate(.55);
+  opacity: .3;
+  transition: filter .45s ease, opacity .45s ease, transform .45s ease;
+  transform: scale(.94);
+}
+.sidebar:hover .sidebar-mark img,
+.sidebar-mark:hover img {
+  filter: blur(0) saturate(1);
+  opacity: .82;
+  transform: scale(1);
+}
+.sidebar-mark img:hover { opacity: 1; }
+:root[data-theme="dark"] .sidebar-mark img { filter: blur(3px) saturate(.4) brightness(.8); opacity: .24; }
+:root[data-theme="dark"] .sidebar:hover .sidebar-mark img,
+:root[data-theme="dark"] .sidebar-mark:hover img { filter: blur(0) saturate(.9) brightness(1); opacity: .8; }
+
+/* ============================================================ 百宝箱:开关与下拉 */
+/* 与设置页 .row-split 一致:文字在左、开关在右。两处开关都走这一条,别一个左一个右 */
+.tb-switch { flex-direction: row-reverse; align-items: center; gap: 10px; }
+.tb-switch .switch { flex: none; }
+.tb-switch-inline { flex-direction: row-reverse; }
+.tb-field .md-select { width: 100%; }
+/* 下拉菜单要能溢出面板,面板本身不能裁掉它 */
+.tb-panel { overflow: visible; }
