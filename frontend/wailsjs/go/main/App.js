@@ -22,6 +22,10 @@ export function ClearTasks() {
   return window['go']['main']['App']['ClearTasks']();
 }
 
+export function CompressVideo(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['CompressVideo'](arg1, arg2, arg3, arg4);
+}
+
 export function CookieStatus() {
   return window['go']['main']['App']['CookieStatus']();
 }
@@ -176,4 +180,8 @@ export function TestProxy(arg1) {
 
 export function ToolboxBusy() {
   return window['go']['main']['App']['ToolboxBusy']();
+}
+
+export function ToolboxCompressOptionsList() {
+  return window['go']['main']['App']['ToolboxCompressOptionsList']();
 }

@@ -111,6 +111,10 @@ type App struct {
 	hevcProbedFor     string
 	hevcGPU           *hevcEncoderSpec
 	toolbox           toolboxRunner
+	// 压缩功能的显卡编码器缓存。与上面 HEVC 的分开:
+	// 同一张卡上 h264 与 hevc 的可用性不一定相同,别互相污染。
+	toolboxGPU   map[string]*hevcEncoderSpec
+	toolboxGPUMu sync.Mutex
 }
 
 type titleJob struct {
@@ -152,7 +156,7 @@ func defaultSettings() Settings {
 }
 
 func NewApp() *App {
-	app := &App{store: Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()}, workers: make(map[int]context.CancelFunc), retryAttempts: make(map[int]int), bestProgress: make(map[int]int), titleJobs: make(chan struct{}, 2)}
+	app := &App{store: Store{Version: 2, NextID: 1, Tasks: []Task{}, Settings: defaultSettings()}, workers: make(map[int]context.CancelFunc), retryAttempts: make(map[int]int), bestProgress: make(map[int]int), titleJobs: make(chan struct{}, 2), toolboxGPU: make(map[string]*hevcEncoderSpec)}
 	if base, err := os.UserConfigDir(); err == nil {
 		app.storePath = filepath.Join(base, "DownTube", "state.json")
 		app.load()
@@ -1685,10 +1689,20 @@ func hevcCPUSpec() hevcEncoderSpec {
 }
 
 // hevcGPUCandidates 显卡编码器候选(按优先级探测);参数只有在该机器上探测通过才会使用。
-var hevcGPUCandidates = []hevcEncoderSpec{
-	{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "26", "-b:v", "0"}},
-	{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "26"}},
-	{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"}},
+// gpuEncoderCandidates 显卡编码器候选(按编码器名分组,按优先级探测);
+// 参数只有在该机器上实测通过才会使用 —— 驱动缺失、显卡不支持等情况会失败。
+// 新增编码器(如 av1)只要在这里加一组即可,探测与回退逻辑不用动。
+var gpuEncoderCandidates = map[string][]hevcEncoderSpec{
+	"h264": {
+		{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", videoArgs: []string{"-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "24", "-b:v", "0"}},
+		{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", videoArgs: []string{"-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "24"}},
+		{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", videoArgs: []string{"-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "22", "-qp_p", "24"}},
+	},
+	"hevc": {
+		{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "26", "-b:v", "0"}},
+		{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "26"}},
+		{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"}},
+	},
 }
 
 // probeHEVCEncoder 用一小段合成画面实测编码器在当前机器上是否可用
@@ -1719,9 +1733,9 @@ func (a *App) resolveHEVCVideoEncoder(ffmpegPath string) (hevcEncoderSpec, bool)
 		return hevcCPUSpec(), false
 	}
 	var found *hevcEncoderSpec
-	for i := range hevcGPUCandidates {
-		if probeHEVCEncoder(ffmpegPath, hevcGPUCandidates[i]) {
-			spec := hevcGPUCandidates[i]
+	for i := range gpuEncoderCandidates["hevc"] {
+		if probeHEVCEncoder(ffmpegPath, gpuEncoderCandidates["hevc"][i]) {
+			spec := gpuEncoderCandidates["hevc"][i]
 			found = &spec
 			break
 		}

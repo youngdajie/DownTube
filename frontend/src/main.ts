@@ -192,6 +192,13 @@ interface AppState {
   toolboxProgress: number
   toolboxMessage: string
   toolboxResult: string
+
+  // —— 百宝箱:视频压缩(选项由后端下发,避免两边各写一份) ——
+  toolboxCompressVideo: string
+  toolboxCompressFormats: Array<{ id: string; label: string; ext: string }>
+  toolboxCompressQualities: Array<{ id: string; label: string; note: string }>
+  toolboxCompressFormat: string
+  toolboxCompressQuality: string
 }
 
 const state: AppState = {
@@ -267,6 +274,11 @@ const state: AppState = {
   toolboxProgress: 0,
   toolboxMessage: '',
   toolboxResult: '',
+  toolboxCompressVideo: '',
+  toolboxCompressFormats: [],
+  toolboxCompressQualities: [],
+  toolboxCompressFormat: 'mp4-h265',
+  toolboxCompressQuality: 'balanced',
 }
 
 let scrollReset = false
@@ -405,6 +417,8 @@ function render() {
   bind()
   syncWindowButtons()
   if (state.page === 'settings' && state.settingsSection === 'format') refreshEncoderHint()
+  // 百宝箱的压缩选项由后端下发,首次进入时拉一次
+  if (state.page === 'toolbox' && !state.toolboxCompressFormats.length) loadToolboxCompressOptions()
   state.enterAnim = false
   const newContent = root.querySelector('.content')
   if (newContent) newContent.scrollTop = keepScroll
@@ -881,6 +895,40 @@ function renderToolboxFFmpeg() {
       </div>
     </div>
 
+    <div class="tb-panel">
+      <div class="tb-panel-title">${icon('package', 15)}视频压缩</div>
+      <p class="tb-panel-desc">重新编码视频,让文件变小。画质和体积由压缩率决定,输出格式可以自己选</p>
+      <div class="tb-file">
+        <span class="tb-file-tag">视频</span>
+        <span class="tb-file-name" id="tbCompressName">${state.toolboxCompressVideo ? safe(shortURL(state.toolboxCompressVideo)) : '未选择'}</span>
+        <button class="btn btn-ghost btn-sm" id="tbPickCompress" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
+      </div>
+      <div class="tb-compress-opts">
+        <label class="tb-field">
+          <span>输出格式</span>
+          <select id="tbCompressFormat" ${state.toolboxBusy ? 'disabled' : ''}>
+            ${state.toolboxCompressFormats.map(f =>
+              `<option value="${f.id}" ${state.toolboxCompressFormat === f.id ? 'selected' : ''}>${safe(f.label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="tb-field">
+          <span>压缩率</span>
+          <select id="tbCompressQuality" ${state.toolboxBusy ? 'disabled' : ''}>
+            ${state.toolboxCompressQualities.map(q =>
+              `<option value="${q.id}" ${state.toolboxCompressQuality === q.id ? 'selected' : ''}>${safe(q.label)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="tb-switch tb-switch-inline">
+          <input type="checkbox" id="tbCompressGPU" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}>
+          <span>显卡加速</span>
+        </label>
+      </div>
+      <p class="tb-hint" id="tbQualityNote">${safe(state.toolboxCompressQualities.find(q => q.id === state.toolboxCompressQuality)?.note || '')}</p>
+      <div class="tb-actions">
+        <button class="btn btn-primary btn-sm" id="tbCompress" ${state.toolboxCompressVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('package', 14)}开始压缩</button>
+      </div>
+    </div>
+
     <label class="tb-switch">
       <input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}>
       <span>显卡加速重编码（输出 H.265，文件更小）</span>
@@ -1283,6 +1331,20 @@ function bind() {
   $('#tbCancel')?.addEventListener('click', cancelToolboxTask)
   $('#tbReencode')?.addEventListener('change', (e) => {
     state.toolboxReencode = (e.target as HTMLInputElement).checked
+  })
+
+  // 百宝箱:视频压缩
+  $('#tbPickCompress')?.addEventListener('click', pickToolboxCompressVideo)
+  $('#tbCompress')?.addEventListener('click', startToolboxCompress)
+  $('#tbCompressFormat')?.addEventListener('change', (e) => {
+    // 选项为空时 value 是空串,别把它写回状态
+    const v = (e.target as HTMLSelectElement).value
+    if (v) state.toolboxCompressFormat = v
+  })
+  $('#tbCompressQuality')?.addEventListener('change', (e) => {
+    const v = (e.target as HTMLSelectElement).value
+    if (v) state.toolboxCompressQuality = v
+    patchToolboxQualityNote()
   })
 
   // 版本更新
@@ -1907,6 +1969,94 @@ async function startToolboxTask(kind: 'merge' | 'split') {
 async function cancelToolboxTask() {
   if (!state.toolboxBusy) return
   await backend()?.CancelToolboxTask?.()
+}
+
+/** 拉取后端下发的压缩选项(格式 + 压缩率档位) */
+async function loadToolboxCompressOptions() {
+  const api = backend()
+  if (!api?.ToolboxCompressOptionsList) return
+  try {
+    const opts = await api.ToolboxCompressOptionsList()
+    if (opts?.formats?.length) {
+      state.toolboxCompressFormats = opts.formats
+      // 当前选中的格式若已不在列表里(后端改过选项),回退到第一项
+      if (!opts.formats.some(f => f.id === state.toolboxCompressFormat)) {
+        state.toolboxCompressFormat = opts.formats[0].id
+      }
+    }
+    if (opts?.quality?.length) {
+      state.toolboxCompressQualities = opts.quality
+      if (!opts.quality.some(q => q.id === state.toolboxCompressQuality)) {
+        state.toolboxCompressQuality = opts.quality[Math.min(1, opts.quality.length - 1)].id
+      }
+    }
+    // 选项是异步拿到的,首帧渲染时两个下拉框还是空的 —— 必须补一次渲染,
+    // 否则用户看到的是空下拉,而且此时任何 change 事件都会把状态写成空串
+    if (state.page === 'toolbox') render()
+  } catch {
+    if (state.page === 'toolbox') { toast('压缩选项加载失败,请重新进入本页'); render() }
+  }
+}
+
+async function pickToolboxCompressVideo() {
+  const api = backend()
+  if (!api?.PickToolboxVideo) { toast('桌面版中可使用文件选择器'); return }
+  try {
+    const res = await api.PickToolboxVideo()
+    if (!res || res.canceled) return
+    if (!res.ok) { toast(res.message || '无法读取该视频'); return }
+    state.toolboxCompressVideo = res.path!
+    state.toolboxResult = ''
+    render()
+  } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
+}
+
+/** 压缩率档位切换时,只更新下面那行说明,不整页重绘 */
+function patchToolboxQualityNote() {
+  const note = $('#tbQualityNote')
+  if (!note) return
+  const q = state.toolboxCompressQualities.find(x => x.id === state.toolboxCompressQuality)
+  note.textContent = q?.note || ''
+}
+
+async function startToolboxCompress() {
+  const api = backend()
+  if (!api) return
+  if (!state.toolboxCompressVideo) { toast('请先选择要压缩的视频'); return }
+  if (!state.toolboxCompressFormats.length) { toast('压缩选项还没加载好,请稍候再试'); return }
+  state.toolboxBusy = true
+  state.toolboxProgress = 0
+  state.toolboxResult = ''
+  state.toolboxMessage = '正在准备压缩…'
+  render()
+  try {
+    const res = await api.CompressVideo!(
+      state.toolboxCompressVideo,
+      state.toolboxCompressFormat,
+      state.toolboxCompressQuality,
+      state.toolboxReencode
+    )
+    if (!res || res.canceled) {
+      state.toolboxBusy = false
+      state.toolboxMessage = ''
+      state.toolboxResult = ''
+      render()
+      return
+    }
+    if (!res.ok) {
+      state.toolboxBusy = false
+      state.toolboxProgress = 0
+      state.toolboxMessage = ''
+      state.toolboxResult = `失败：${res.message || '无法启动'}`
+      render()
+      toast(res.message || '无法启动')
+    }
+  } catch (error) {
+    state.toolboxBusy = false
+    state.toolboxMessage = ''
+    state.toolboxResult = `失败：${(error as Error).message}`
+    render()
+  }
 }
 
 /** 进度事件:更新进度条,不整页重绘(避免打断文件选择等交互) */

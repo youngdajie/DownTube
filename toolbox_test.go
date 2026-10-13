@@ -204,3 +204,146 @@ func TestToolboxRunnerConcurrent(t *testing.T) {
 		t.Errorf("20 个并发 begin 只应有 1 个成功, 实际 %d", wins)
 	}
 }
+
+// ---------- 视频压缩 ----------
+
+// TestToolboxCompressOptions 选项必须由后端下发,且三种常用格式都在。
+func TestToolboxCompressOptions(t *testing.T) {
+	app := &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
+	opts := app.ToolboxCompressOptionsList()
+	if len(opts.Formats) != 3 {
+		t.Fatalf("应有 3 种格式, 得到 %d", len(opts.Formats))
+	}
+	ids := map[string]bool{}
+	for _, f := range opts.Formats {
+		ids[f.ID] = true
+		if f.Ext == "" || f.Label == "" {
+			t.Errorf("格式 %q 的 ext/label 不能为空", f.ID)
+		}
+	}
+	for _, want := range []string{"mp4-h264", "mp4-h265", "webm-vp9"} {
+		if !ids[want] {
+			t.Errorf("缺少格式 %s", want)
+		}
+	}
+	if len(opts.Quality) != 3 {
+		t.Fatalf("应有 3 档压缩率, 得到 %d", len(opts.Quality))
+	}
+}
+
+// TestToolboxCompressCRF 压缩率档位必须单调:越高画质 CRF 越小。
+func TestToolboxCompressCRF(t *testing.T) {
+	high, balanced, small := toolboxCompressCRF("high"), toolboxCompressCRF("balanced"), toolboxCompressCRF("small")
+	if !(high < balanced && balanced < small) {
+		t.Errorf("CRF 应随压缩率递增: 高画质=%d 均衡=%d 小体积=%d", high, balanced, small)
+	}
+	if got := toolboxCompressCRF("不存在的档位"); got != balanced {
+		t.Errorf("未知档位应回退到均衡(%d), 得到 %d", balanced, got)
+	}
+}
+
+// TestToolboxCompressFormatFallback 未知格式必须回退,不能让 ffmpeg 拿到空扩展名。
+func TestToolboxCompressFormatFallback(t *testing.T) {
+	if got := toolboxCompressFormat("胡说八道"); got.ID != "mp4-h264" {
+		t.Errorf("未知格式应回退到 mp4-h264, 得到 %s", got.ID)
+	}
+	if got := toolboxCompressQuality("胡说八道"); got.ID != "balanced" {
+		t.Errorf("未知档位应回退到 balanced, 得到 %s", got.ID)
+	}
+}
+
+// TestToolboxCompressArgs 编码参数:CPU 回退、VP9 的 -b:v 0、音频容器匹配。
+func TestToolboxCompressArgs(t *testing.T) {
+	app := &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
+	// 不探测显卡(useGPU=false),必须落到 CPU 编码器
+	for _, tc := range []struct {
+		format string
+		want   string
+		audio  string
+	}{
+		{"mp4-h264", "libx264", "aac"},
+		{"mp4-h265", "libx265", "aac"},
+		{"webm-vp9", "libvpx-vp9", "libopus"},
+	} {
+		args, gpu := app.toolboxCompressVideoArgs("ffmpeg.exe", tc.format, 26, false)
+		if gpu {
+			t.Errorf("%s 未勾选显卡却走了显卡", tc.format)
+		}
+		if !containsArg(args, "-c:v", tc.want) {
+			t.Errorf("%s 应使用 %s, 实际参数 %v", tc.format, tc.want, args)
+		}
+		if !containsArg(args, "-crf", "26") {
+			t.Errorf("%s 应带上 -crf 26, 实际参数 %v", tc.format, args)
+		}
+		a := toolboxCompressAudioArgs(tc.format)
+		if !containsArg(a, "-c:a", tc.audio) {
+			t.Errorf("%s 的音频应为 %s, 实际 %v", tc.format, tc.audio, a)
+		}
+	}
+	// VP9 的 CRF 模式必须配 -b:v 0,否则按 VBR 跑,画质档位失效
+	vp9, _ := app.toolboxCompressVideoArgs("ffmpeg.exe", "webm-vp9", 28, false)
+	if !containsArg(vp9, "-b:v", "0") {
+		t.Errorf("VP9 必须配 -b:v 0, 实际 %v", vp9)
+	}
+	// webm 里不能放 aac,mp4 里不能放 opus
+	if got := toolboxCompressAudioArgs("webm-vp9"); containsArg(got, "-c:a", "aac") {
+		t.Error("WebM 容器不支持 AAC")
+	}
+	if got := toolboxCompressAudioArgs("mp4-h264"); containsArg(got, "-c:a", "libopus") {
+		t.Error("MP4 容器不支持 Opus")
+	}
+}
+
+// TestToolboxCompressGPUProbeCache 显卡探测结果要按「编码器 + ffmpeg 路径」缓存,
+// 且探测不到时缓存 false,不会每次压缩都重新探测一遍。
+func TestToolboxCompressGPUProbeCache(t *testing.T) {
+	app := &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
+	// 用一个不可能存在的 ffmpeg 路径:探测必然失败,但结果要被缓存
+	if _, ok := app.resolveToolboxGPU("Z:/不存在的/ffmpeg.exe", "h264"); ok {
+		t.Error("不存在的 ffmpeg 不该探测到显卡编码器")
+	}
+	if _, cached := app.toolboxGPU["h264|Z:/不存在的/ffmpeg.exe"]; !cached {
+		t.Error("探测失败的结果也应缓存,避免重复探测")
+	}
+	// hevc 与 h264 分开缓存
+	if _, cached := app.toolboxGPU["hevc|Z:/不存在的/ffmpeg.exe"]; cached {
+		t.Error("hevc 的缓存键不应被 h264 污染")
+	}
+	// 未知编码器名:候选列表为空,直接返回 false 且不 panic
+	if _, ok := app.resolveToolboxGPU("ffmpeg.exe", "av1"); ok {
+		t.Error("未登记的编码器不该返回可用")
+	}
+}
+
+// TestCompressOutputName 输出名要能看出是压缩产物,且不带重复扩展名。
+func TestCompressOutputName(t *testing.T) {
+	if got := compressOutputName("D:/a/b/我的视频.mp4", ".mp4"); got != "我的视频_压缩.mp4" {
+		t.Errorf("compressOutputName = %q", got)
+	}
+	if got := compressOutputName("D:/a/b/我的视频.mkv", ".webm"); got != "我的视频_压缩.webm" {
+		t.Errorf("compressOutputName = %q", got)
+	}
+	if got := compressOutputName("D:/a/b/无扩展名", ".mp4"); got != "无扩展名_压缩.mp4" {
+		t.Errorf("compressOutputName = %q", got)
+	}
+}
+
+// TestToolboxCompressContractKeys 压缩接口的 JSON 键集。
+func TestToolboxCompressContractKeys(t *testing.T) {
+	opts := (&App{toolboxGPU: make(map[string]*hevcEncoderSpec)}).ToolboxCompressOptionsList()
+	assertSameKeys(t, "ToolboxCompressOptions",
+		map[string]any{"formats": []any{}, "quality": []any{}}, opts)
+	assertSameKeys(t, "ToolboxCompressFormat",
+		map[string]any{"id": "mp4-h264", "label": "L", "ext": ".mp4"}, opts.Formats[0])
+	assertSameKeys(t, "ToolboxCompressQuality",
+		map[string]any{"id": "high", "label": "L", "note": "N"}, opts.Quality[0])
+}
+
+func containsArg(args []string, flag, value string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
+}

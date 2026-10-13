@@ -380,6 +380,71 @@ export namespace main {
 	    }
 	}
 	
+	export class ToolboxCompressFormat {
+	    id: string;
+	    label: string;
+	    ext: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolboxCompressFormat(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.ext = source["ext"];
+	    }
+	}
+	export class ToolboxCompressQuality {
+	    id: string;
+	    label: string;
+	    note: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolboxCompressQuality(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.note = source["note"];
+	    }
+	}
+	export class ToolboxCompressOptions {
+	    formats: ToolboxCompressFormat[];
+	    quality: ToolboxCompressQuality[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolboxCompressOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.formats = this.convertValues(source["formats"], ToolboxCompressFormat);
+	        this.quality = this.convertValues(source["quality"], ToolboxCompressQuality);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class ToolboxStartResult {
 	    ok: boolean;
 	    message?: string;

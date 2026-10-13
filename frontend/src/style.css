@@ -1194,3 +1194,21 @@ h1, h2, h3, p { margin: 0; }
 [data-theme="dark"] .sites-best b { background: rgba(18, 150, 219, .18); }
 [data-theme="dark"] .tb-card-icon { background: rgba(18, 150, 219, .18); }
 [data-theme="dark"] .tb-recommend-tip { background: rgba(18, 150, 219, .15); }
+
+/* ============================================================ 百宝箱:视频压缩 */
+.tb-compress-opts {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px;
+  margin: 11px 0 8px;
+}
+.tb-field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 130px; }
+.tb-field > span { font-size: 11.5px; color: var(--text-3); }
+.tb-field select {
+  width: 100%; padding: 6px 9px; font-size: 12.5px;
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface); color: var(--text);
+  cursor: pointer;
+}
+.tb-field select:hover { border-color: var(--border-2); }
+.tb-field select:focus { outline: none; border-color: var(--primary); }
+.tb-field select:disabled { opacity: .55; cursor: not-allowed; }
+.tb-switch-inline { flex: none; padding-bottom: 7px; white-space: nowrap; }

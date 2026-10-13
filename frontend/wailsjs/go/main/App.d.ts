@@ -12,6 +12,8 @@ export function CheckUpdate(arg1:string):Promise<main.UpdateResult>;
 
 export function ClearTasks():Promise<main.Snapshot>;
 
+export function CompressVideo(arg1:string,arg2:string,arg3:string,arg4:boolean):Promise<main.ToolboxStartResult>;
+
 export function CookieStatus():Promise<main.CookieStatusResult>;
 
 export function DownloadUpdate(arg1:string,arg2:string):Promise<main.UpdateDownloadResult>;
@@ -89,3 +91,5 @@ export function StartTask(arg1:number):Promise<main.Snapshot>;
 export function TestProxy(arg1:string):Promise<main.ProxyTestResult>;
 
 export function ToolboxBusy():Promise<boolean>;
+
+export function ToolboxCompressOptionsList():Promise<main.ToolboxCompressOptions>;

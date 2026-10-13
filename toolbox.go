@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -498,4 +499,190 @@ func uniqueFilePath(dir, name, ext string) string {
 		}
 	}
 	return filepath.Join(dir, name+ext)
+}
+
+// ============================================================
+// 视频压缩
+// ============================================================
+
+// ToolboxCompressFormat 一个压缩目标:容器 + 编码器的组合。
+type ToolboxCompressFormat struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Ext   string `json:"ext"`
+}
+
+// ToolboxCompressQuality 一档压缩率。
+type ToolboxCompressQuality struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Note  string `json:"note"`
+}
+
+// ToolboxCompressOptions 压缩可选项,前端据此渲染下拉框。
+// 由后端下发而不是前端硬编码,避免两边各写一份以后对不上。
+type ToolboxCompressOptions struct {
+	Formats []ToolboxCompressFormat  `json:"formats"`
+	Quality []ToolboxCompressQuality `json:"quality"`
+}
+
+// 常用格式三种:MP4+H.264(兼容性最好)、MP4+H.265(体积最小)、WebM+VP9(网页播放)。
+var toolboxCompressFormats = []ToolboxCompressFormat{
+	{ID: "mp4-h264", Label: "MP4 · H.264", Ext: ".mp4"},
+	{ID: "mp4-h265", Label: "MP4 · H.265", Ext: ".mp4"},
+	{ID: "webm-vp9", Label: "WebM · VP9", Ext: ".webm"},
+}
+
+// 压缩率三档,CRF 越小画质越好、文件越大。均衡是默认档。
+var toolboxCompressQualities = []ToolboxCompressQuality{
+	{ID: "high", Label: "高画质", Note: "几乎看不出差别"},
+	{ID: "balanced", Label: "均衡", Note: "推荐"},
+	{ID: "small", Label: "小体积", Note: "画质有可见损失"},
+}
+
+// ToolboxCompressOptionsList 给前端下拉框用。
+func (a *App) ToolboxCompressOptionsList() ToolboxCompressOptions {
+	return ToolboxCompressOptions{Formats: toolboxCompressFormats, Quality: toolboxCompressQualities}
+}
+
+// toolboxCompressCRF 压缩率档位 → CRF 值。档位与数值的对应集中在这里,
+// 前后端都只认档位 ID,不认数值。
+func toolboxCompressCRF(quality string) int {
+	switch quality {
+	case "high":
+		return 20
+	case "small":
+		return 32
+	default:
+		return 26
+	}
+}
+
+// toolboxCompressFormat 按 ID 找目标;找不到时回退到默认的 MP4 · H.264。
+func toolboxCompressFormat(id string) ToolboxCompressFormat {
+	for _, f := range toolboxCompressFormats {
+		if f.ID == id {
+			return f
+		}
+	}
+	return toolboxCompressFormats[0]
+}
+
+// toolboxCompressQuality 按 ID 找档位;找不到时回退到均衡档。
+func toolboxCompressQuality(id string) ToolboxCompressQuality {
+	for _, q := range toolboxCompressQualities {
+		if q.ID == id {
+			return q
+		}
+	}
+	return toolboxCompressQualities[1]
+}
+
+// CompressVideo 重新编码压缩视频。
+//
+// useGPU=true 时优先显卡编码器(H.264/H.265 有 NVENC/QSV/AMF;VP9 在 Windows 上
+// 没有可用的显卡编码器,会自动回退 CPU),探测失败同样回退 CPU。
+func (a *App) CompressVideo(videoPath, format, quality string, useGPU bool) ToolboxStartResult {
+	ffmpegPath := a.ffmpegPathForToolbox()
+	if ffmpegPath == "" {
+		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
+	}
+	if videoPath == "" {
+		return ToolboxStartResult{OK: false, Message: "请先选择要压缩的视频"}
+	}
+	if _, err := os.Stat(videoPath); err != nil {
+		return ToolboxStartResult{OK: false, Message: "视频文件不存在或无法读取"}
+	}
+	target := toolboxCompressFormat(format)
+	preset := toolboxCompressQuality(quality)
+	crf := toolboxCompressCRF(preset.ID)
+
+	videoArgs, _ := a.toolboxCompressVideoArgs(ffmpegPath, target.ID, crf, useGPU)
+	audioArgs := toolboxCompressAudioArgs(target.ID)
+
+	outDir, canceled := a.askToolboxOutputDir()
+	if canceled {
+		return ToolboxStartResult{Canceled: true}
+	}
+	outPath := uniqueFilePath(outDir, compressOutputName(videoPath, target.Ext), target.Ext)
+
+	ctx, ok := a.toolbox.begin()
+	if !ok {
+		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
+	}
+	go a.runToolboxFFmpeg(ctx, "compress", "正在压缩视频", []string{videoPath, ""}, outPath, func(args []string) []string {
+		a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", args[0]}
+		a = append(a, videoArgs...)
+		a = append(a, audioArgs...)
+		a = append(a, "-movflags", "+faststart", args[2])
+		return a
+	})
+	return ToolboxStartResult{OK: true}
+}
+
+// toolboxCompressVideoArgs 拼视频编码参数。VP9 的 CRF 模式必须配 -b:v 0,
+// 否则 ffmpeg 会按普通 VBR 跑,画质档位就失效了。
+func (a *App) toolboxCompressVideoArgs(ffmpegPath, formatID string, crf int, useGPU bool) ([]string, bool) {
+	q := strconv.Itoa(crf)
+	switch formatID {
+	case "mp4-h265":
+		if useGPU {
+			if spec, ok := a.resolveToolboxGPU(ffmpegPath, "hevc"); ok {
+				return spec.videoArgs, true
+			}
+		}
+		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", q}, false
+	case "webm-vp9":
+		// Windows 上没有可用的 VP9 显卡编码器,一律走 CPU
+		return []string{"-c:v", "libvpx-vp9", "-crf", q, "-b:v", "0", "-row-mt", "1"}, false
+	default: // mp4-h264
+		if useGPU {
+			if spec, ok := a.resolveToolboxGPU(ffmpegPath, "h264"); ok {
+				return spec.videoArgs, true
+			}
+		}
+		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", q}, false
+	}
+}
+
+// toolboxCompressAudioArgs 音频统一重编码成目标容器能放的格式。
+// 视频压缩本来就在重编码,音频跟着转一遍比「探测能不能直接复制」更可靠。
+func toolboxCompressAudioArgs(formatID string) []string {
+	if formatID == "webm-vp9" {
+		return []string{"-c:a", "libopus", "-b:a", "128k"}
+	}
+	return []string{"-c:a", "aac", "-b:a", "160k"}
+}
+
+// resolveToolboxGPU 探测指定编码器的显卡实现。
+// 与下载器的 HEVC 缓存分开:同一张卡上 h264 与 hevc 的可用性不一定相同,别互相污染。
+func (a *App) resolveToolboxGPU(ffmpegPath, codec string) (hevcEncoderSpec, bool) {
+	a.toolboxGPUMu.Lock()
+	defer a.toolboxGPUMu.Unlock()
+	key := codec + "|" + ffmpegPath
+	if cached, ok := a.toolboxGPU[key]; ok {
+		if cached == nil {
+			return hevcEncoderSpec{}, false
+		}
+		return *cached, true
+	}
+	var found *hevcEncoderSpec
+	for i := range gpuEncoderCandidates[codec] {
+		spec := gpuEncoderCandidates[codec][i]
+		if probeHEVCEncoder(ffmpegPath, spec) {
+			found = &spec
+			break
+		}
+	}
+	a.toolboxGPU[key] = found
+	if found == nil {
+		return hevcEncoderSpec{}, false
+	}
+	return *found, true
+}
+
+// compressOutputName 输出名带上目标格式,方便区分「这是压缩出来的」。
+func compressOutputName(videoPath, ext string) string {
+	base := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
+	return base + "_压缩" + strings.TrimPrefix(ext, ".")
 }
