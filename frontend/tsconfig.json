@@ -1,0 +1,26 @@
+{
+  // 前端类型检查配置。
+  //
+  // 说明:本项目刻意**不用** tsc 的产物 —— vite 用 esbuild 直接转译 .ts,类型只做校验。
+  // 所以 noEmit 恒为 true,构建产物与迁移前的 JS 完全同构。
+  //
+  // 目标选 ES2022:WebView2(Chromium 100+)原生支持,不必降级。
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    // 样式由 Vite 处理,类型层没有可校验的东西,关掉副作用导入检查
+    "noUncheckedSideEffectImports": false,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    // 关闭会混淆阅读的宽松检查;真正的价值在 strict 那几项
+    "noImplicitAny": true,
+    "types": []
+  },
+  "include": ["src"]
+}

@@ -4,7 +4,7 @@ import './animations.css'
 // ============================================================
 // 图标:统一线性描边风格,颜色继承自 CSS currentColor
 // ============================================================
-const ICON_PATHS = {
+const ICON_PATHS: Record<string, string> = {
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1a2 2 0 1 1-2.8 2.8l-.1-.1a2 2 0 0 0-3.4 1.4v.3a2 2 0 1 1-4 0v-.2A2 2 0 0 0 5.8 17l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a2 2 0 0 0-1.4-3.4h-.3a2 2 0 1 1 0-4h.2A2 2 0 0 0 3 4.2l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a2 2 0 0 0 3.4-1.4v-.3a2 2 0 1 1 4 0v.2A2 2 0 0 0 16.6 1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a2 2 0 0 0 1.4 3.4h.3a2 2 0 1 1 0 4h-.2a2 2 0 0 0-1.5 3.8Z" transform="translate(2 2) scale(.83)"/>',
   log: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
@@ -47,7 +47,7 @@ const ICON_PATHS = {
   key: '<path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3"/>',
   broadcast: '<path d="M4.9 19.1a10 10 0 0 1 0-14.2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4"/><path d="M19.1 4.9a10 10 0 0 1 0 14.2"/><circle cx="12" cy="12" r="1.5"/>',
 }
-const icon = (name, size = 17) =>
+const icon = (name: string, size = 17) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ICON_PATHS.info}</svg>`
 
 // 构建时由 vite.config.js 从 wails.json 注入,界面上不要写死版本号。
@@ -81,9 +81,38 @@ const SETTINGS_SECTIONS = [
   { id: 'engine', icon: 'cpu', title: '下载引擎', sub: 'yt-dlp、FFmpeg 与程序数据', desc: '下载所依赖的本地组件，以及程序数据的存放位置' },
 ]
 
-const STATUS_CLASS = { 等待中: 'waiting', 准备中: 'running', 已暂停: 'paused', 已完成: 'done', 失败: 'failed' }
+/**
+ * 元素查询助手。运行时行为与 `document.querySelector` 完全一致,
+ * 只是把「这个选择器拿到的是什么元素」的类型断言集中到一处,
+ * 免得 1700 多行模板代码里散落一地的 `as HTMLInputElement`。
+ *
+ * 用 `$` 这个短名字是因为它会出现在上百个调用点;它不是 jQuery,只是本文件的局部别名。
+ */
+const $ = <T extends Element = HTMLElement>(selector: string): T => document.querySelector(selector) as T
 
-const state = {
+const STATUS_CLASS: Record<string, string> = { 等待中: 'waiting', 准备中: 'running', 已暂停: 'paused', 已完成: 'done', 失败: 'failed' }
+
+/**
+ * 全局界面状态。
+ *
+ * 这里显式标注类型,是为了让 tasks / cookiePlatforms 拿到元素类型 ——
+ * 否则空数组会被推断成 never[],导致后续所有 `task.xxx` 都报「属性不存在」。
+ * 字面量取值收成联合类型,拼错会在编译期被发现。
+ */
+interface AppState {
+  page: 'downloads' | 'settings' | 'about'
+  theme: 'light' | 'dark'
+  queueStep: 'add' | 'list'
+  linkMode: 'batch' | 'single'
+  tasks: Task[]
+  filter: string
+  cookiePlatforms: CookieStatus['platforms'] & unknown[]
+  settingsBaseline: Record<string, any> | null
+  /** 后端返回的动态字段一律放开索引,避免为了过类型而层层断言 */
+  [key: string]: any
+}
+
+const state: AppState = {
   page: 'downloads',
   theme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
   queueStep: 'add',
@@ -147,17 +176,18 @@ const state = {
 }
 
 let scrollReset = false
-const root = document.querySelector('#app')
+const root = $('#app')
 const backend = () => window.go?.main?.App
 window.addEventListener('error', event => backend()?.ReportFrontendError?.(`${event.message} (${event.filename}:${event.lineno})`))
 window.addEventListener('unhandledrejection', event => backend()?.ReportFrontendError?.(`unhandled rejection: ${event.reason}`))
 
 const taskCount = () => state.tasks.length
-const safe = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const ESCAPE_MAP: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+const safe = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, c => ESCAPE_MAP[c] ?? c)
 
 // notesForDisplay 把 Release 说明里的 Markdown 压成纯文本。
 // 更新弹窗用 pre-wrap 直接显示文本，不渲染 Markdown，压平后才不会露出 ### 和 ** 这类标记。
-function notesForDisplay(raw) {
+function notesForDisplay(raw: string) {
   return String(raw ?? '')
     .replace(/^```[^\n]*$/gm, '')
     .replace(/^[^\S\n]*#{1,6}[^\S\n]*DownTube[^\S\n]*[\d.]*[^\S\n]*$/im, '') // 首行标题与弹窗标题重复，去掉
@@ -173,14 +203,14 @@ function notesForDisplay(raw) {
 // isSupportedURL 粗筛粘贴的内容像不像能交给 yt-dlp 的链接。
 // yt-dlp 支持 1700 多个站点,没法逐一列举域名,这里只做格式判断;
 // 具体能不能下载由解析阶段决定,失败时会给出对应站点的提示。
-const isSupportedURL = (raw) => {
+const isSupportedURL = (raw: string) => {
   try {
     const u = new URL(raw)
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
     return u.hostname.includes('.')
   } catch { return false }
 }
-const shortURL = (url) => String(url || '').replace(/^https?:\/\//, '').replace(/\/$/, '')
+const shortURL = (url: string) => String(url || '').replace(/^https?:\/\//, '').replace(/\/$/, '')
 
 // ============================================================
 // 主题
@@ -190,7 +220,7 @@ function toggleTheme() {
   state.theme = next
   document.documentElement.dataset.theme = next
   try { localStorage.setItem('downtube-theme', next) } catch { /* 存储不可用时仅本次生效 */ }
-  const button = document.querySelector('#themeToggle')
+  const button = $('#themeToggle')
   if (button) {
     button.innerHTML = icon(next === 'dark' ? 'sun' : 'moon', 16)
     button.title = next === 'dark' ? '切换到浅色模式' : '切换到深色模式'
@@ -200,11 +230,11 @@ function toggleTheme() {
 // ============================================================
 // 数据同步
 // ============================================================
-function applySnapshot(snapshot) {
+function applySnapshot(snapshot: Snapshot) {
   if (!snapshot) return
   state.tasks = snapshot.tasks || []
   if (state.settingsDirty) return
-  const s = snapshot.settings || {}
+  const s: Record<string, any> = snapshot.settings || {}
   state.quality = s.quality || state.quality
   state.type = s.downloadType || state.type
   state.folder = s.downloadDir || state.folder
@@ -231,14 +261,14 @@ async function refreshSnapshot() {
     // 打开时如果已有任务在下载,直接进入队列视图
     if (state.tasks.some(t => t.status === '准备中')) state.queueStep = 'list'
     render()
-  } catch (error) { console.error(error); toast(`读取本地数据失败：${error.message}`) }
+  } catch (error) { console.error(error); toast(`读取本地数据失败：${(error as Error).message}`) }
 }
 
 // ============================================================
 // 渲染
 // ============================================================
 function render() {
-  const active = document.activeElement
+  const active = document.activeElement as (Element & { selectionStart?: number | null }) | null
   const activeId = active && active !== document.body && active.id ? active.id : ''
   const selStart = active && typeof active.selectionStart === 'number' ? active.selectionStart : null
   const oldContent = root.querySelector('.content')
@@ -284,7 +314,7 @@ function render() {
   const newContent = root.querySelector('.content')
   if (newContent) newContent.scrollTop = keepScroll
   if (activeId) {
-    const el = document.getElementById(activeId)
+    const el = document.getElementById(activeId) as (HTMLElement & { setSelectionRange?: (a: number, b: number) => void }) | null
     if (el) {
       el.focus()
       if (selStart !== null && typeof el.setSelectionRange === 'function') {
@@ -411,7 +441,7 @@ function renderQueueView() {
   `
 }
 
-function renderTable(list) {
+function renderTable(list: Task[]) {
   if (!state.tasks.length) {
     return `<div class="empty"><span class="empty-icon">${icon('video', 22)}</span><b>队列还是空的</b><p>在「添加链接」里粘贴链接，任务会显示在这里</p></div>`
   }
@@ -425,11 +455,11 @@ function renderTable(list) {
   </table>`
 }
 
-function taskSig(t) {
+function taskSig(t: Task) {
   return `${t.status}|${t.phase || ''}|${t.progress}|${t.title}|${t.error || ''}|${t.quality}`
 }
 
-function taskRow(t) {
+function taskRow(t: Task) {
   const statusClass = STATUS_CLASS[t.status] || 'waiting'
   const statusText = t.phase || t.status
   const active = t.status === '准备中'
@@ -480,7 +510,7 @@ function renderSettings() {
 }
 
 // renderCookiePlatformRow 渲染分站点 Cookies 的一行：站点名 + 导入状态 + 导入/移除。
-function renderCookiePlatformRow(p) {
+function renderCookiePlatformRow(p: CookiePlatform) {
   const busy = state.cookieBusy === p.id
   const imported = !!p.imported
   const detail = imported
@@ -495,7 +525,7 @@ function renderCookiePlatformRow(p) {
   </div>`
 }
 
-function renderSettingsSection(id) {
+function renderSettingsSection(id: string) {
   if (id === 'location') {
     return `
       <div class="set-card">
@@ -642,7 +672,7 @@ function renderSettingsSection(id) {
     </div>`
 }
 
-function selectControl(setting, options, value, ariaLabel) {
+function selectControl(setting: string, options: SelectOption[], value: unknown, ariaLabel?: string) {
   const id = `select-${setting}`
   const items = options.map(o => (typeof o === 'string' ? { value: o, label: o } : o))
   const current = items.find(o => o.value === String(value))
@@ -795,12 +825,12 @@ function renderFFmpegModal() {
 // ============================================================
 // Toast
 // ============================================================
-function toast(message) {
+function toast(message: string) {
   document.querySelectorAll('.toast').forEach(el => el.remove())
   const el = document.createElement('div')
   el.className = 'toast'
   el.innerHTML = `${icon('checkcircle', 17)}<span>${safe(message)}</span>`
-  document.querySelector('.app-window')?.appendChild(el)
+  $('.app-window')?.appendChild(el)
   setTimeout(() => el.remove(), 2400)
 }
 
@@ -808,84 +838,84 @@ function toast(message) {
 // 局部更新(后台事件驱动,避免打断输入与滚动)
 // ============================================================
 function patchDownloads() {
-  const badge = document.querySelector('.nav-item[data-page="downloads"] em')
+  const badge = $('.nav-item[data-page="downloads"] em')
   if (badge) badge.textContent = state.tasks.length ? String(state.tasks.length) : ''
-  const stepListSmall = document.querySelector('#stepListSmall')
+  const stepListSmall = $('#stepListSmall')
   if (stepListSmall) {
     const total = taskCount()
     const running = state.tasks.filter(t => t.status === '准备中').length
     stepListSmall.textContent = total ? `${total} 个任务${running ? ` · ${running} 进行中` : ''}` : '暂无任务'
   }
   if (state.queueStep !== 'list') return
-  const sub = document.querySelector('#queueSub')
+  const sub = $('#queueSub')
   if (sub) sub.textContent = queueSummary()
-  const runBtns = document.querySelector('#queueRunBtns')
+  const runBtns = $('#queueRunBtns')
   if (runBtns) runBtns.innerHTML = queueRunButtons()
-  const wrap = document.querySelector('#queueTableWrap')
+  const wrap = $('#queueTableWrap')
   if (!wrap) return
   const filtered = filterTasks()
   const bodyEl = wrap.querySelector('#queueBody')
   const wanted = filtered.map(t => t.id)
-  const current = bodyEl ? [...bodyEl.children].map(tr => Number(tr.dataset.id)) : null
+  const current = bodyEl ? [...(bodyEl.children as unknown as HTMLElement[])].map(tr => Number(tr.dataset.id)) : null
   if (!bodyEl || JSON.stringify(wanted) !== JSON.stringify(current)) {
     wrap.innerHTML = renderTable(filtered)
   } else {
-    for (const tr of [...bodyEl.children]) {
+    for (const tr of [...(bodyEl.children as unknown as HTMLElement[])]) {
       const t = state.tasks.find(x => x.id === Number(tr.dataset.id))
       if (!t || tr.dataset.sig === taskSig(t)) continue
       const holder = document.createElement('tbody')
       holder.innerHTML = taskRow(t)
-      tr.replaceWith(holder.firstElementChild)
+      tr.replaceWith(holder.firstElementChild!)
     }
   }
-  const foot = document.querySelector('#queueFootCount')
+  const foot = $('#queueFootCount')
   if (foot) foot.textContent = `显示 ${filtered.length} / ${state.tasks.length} 个任务`
 }
 
 function refreshQueueList() {
-  const wrap = document.querySelector('#queueTableWrap')
+  const wrap = $('#queueTableWrap')
   if (!wrap) return
   const filtered = filterTasks()
   wrap.innerHTML = renderTable(filtered)
-  const foot = document.querySelector('#queueFootCount')
+  const foot = $('#queueFootCount')
   if (foot) foot.textContent = `显示 ${filtered.length} / ${state.tasks.length} 个任务`
 }
 
 // ============================================================
 // 绑定与全局委托
 // ============================================================
-function closeSelect(select, restoreFocus = false) {
+function closeSelect(select: HTMLElement | null, restoreFocus = false) {
   if (!select?.classList.contains('is-open')) return
   select.classList.remove('is-open')
   select.querySelector('.select-trigger')?.setAttribute('aria-expanded', 'false')
-  if (restoreFocus) select.querySelector('.select-trigger')?.focus()
+  if (restoreFocus) select.querySelector<HTMLElement>('.select-trigger')?.focus()
 }
-function closeAllSelects(except = null) {
-  root.querySelectorAll('.md-select.is-open').forEach(select => { if (select !== except) closeSelect(select) })
+function closeAllSelects(except: HTMLElement | null = null) {
+  root.querySelectorAll<HTMLElement>('.md-select.is-open').forEach(select => { if (select !== except) closeSelect(select) })
 }
 
 root.addEventListener('click', event => {
   // 任务行操作
-  const actionBtn = event.target.closest('[data-action]')
-  if (actionBtn) { handleTask(actionBtn.dataset.action, Number(actionBtn.dataset.id)); return }
+  const actionBtn = (event.target as HTMLElement).closest<HTMLElement>('[data-action]')
+  if (actionBtn) { handleTask(actionBtn.dataset.action!, Number(actionBtn.dataset.id)); return }
   // 队列运行控制(会被局部更新替换,必须走委托)
-  if (event.target.closest('#startAll')) { startAll(); return }
-  if (event.target.closest('#pauseAll')) { pauseAll(); return }
+  if ((event.target as HTMLElement).closest<HTMLElement>('#startAll')) { startAll(); return }
+  if ((event.target as HTMLElement).closest<HTMLElement>('#pauseAll')) { pauseAll(); return }
   // 导航
-  const navBtn = event.target.closest('[data-page]')
+  const navBtn = (event.target as HTMLElement).closest<HTMLElement>('[data-page]')
   if (navBtn) {
     const page = navBtn.dataset.page
     if (page !== state.page) {
       state.enterAnim = true
       scrollReset = true
-      state.page = page
+      state.page = page as AppState['page']
       if (page === 'settings') { captureSettingsBaseline(); refreshBrowserRunning(); refreshCookieStatus() }
       render()
     }
     return
   }
   // 设置分类
-  const sectionBtn = event.target.closest('[data-section]')
+  const sectionBtn = (event.target as HTMLElement).closest<HTMLElement>('[data-section]')
   if (sectionBtn) {
     if (sectionBtn.dataset.section !== state.settingsSection) {
       state.settingsSection = sectionBtn.dataset.section
@@ -895,53 +925,53 @@ root.addEventListener('click', event => {
     return
   }
   // 解析模式 tab
-  const modeBtn = event.target.closest('[data-mode]')
+  const modeBtn = (event.target as HTMLElement).closest<HTMLElement>('[data-mode]')
   if (modeBtn) {
-    if (modeBtn.dataset.mode !== state.linkMode) { state.linkMode = modeBtn.dataset.mode; render(); document.querySelector('#linkInput')?.focus() }
+    if (modeBtn.dataset.mode !== state.linkMode) { state.linkMode = modeBtn.dataset.mode as AppState['linkMode']; render(); $('#linkInput')?.focus() }
     return
   }
   // 外部下载镜像
-  const urlBtn = event.target.closest('[data-url]')
+  const urlBtn = (event.target as HTMLElement).closest<HTMLElement>('[data-url]')
   if (urlBtn) {
     const url = urlBtn.dataset.url
     const api = backend()
-    if (api?.OpenExternalURL) api.OpenExternalURL(url)
+    if (api?.OpenExternalURL) api.OpenExternalURL(url!)
     else window.open(url, '_blank')
     return
   }
   // Cookies 来源 tab
-  const cookieTab = event.target.closest('[data-cookie-source]')
-  if (cookieTab) { setCookieSource(cookieTab.dataset.cookieSource); return }
+  const cookieTab = (event.target as HTMLElement).closest<HTMLElement>('[data-cookie-source]')
+  if (cookieTab) { setCookieSource(cookieTab.dataset.cookieSource!); return }
   // 分站点 Cookies 导入/移除
-  const cookieImport = event.target.closest('[data-cookie-import]')
-  if (cookieImport) { importPlatformCookie(cookieImport.dataset.cookieImport); return }
-  const cookieRemove = event.target.closest('[data-cookie-remove]')
-  if (cookieRemove) { removePlatformCookie(cookieRemove.dataset.cookieRemove); return }
+  const cookieImport = (event.target as HTMLElement).closest<HTMLElement>('[data-cookie-import]')
+  if (cookieImport) { importPlatformCookie(cookieImport.dataset.cookieImport!); return }
+  const cookieRemove = (event.target as HTMLElement).closest<HTMLElement>('[data-cookie-remove]')
+  if (cookieRemove) { removePlatformCookie(cookieRemove.dataset.cookieRemove!); return }
   // 自定义下拉
-  const trigger = event.target.closest('.select-trigger')
+  const trigger = (event.target as HTMLElement).closest<HTMLElement>('.select-trigger')
   if (trigger) {
-    const select = trigger.closest('.md-select')
+    const select = trigger.closest<HTMLElement>('.md-select')!
     const shouldOpen = !select.classList.contains('is-open')
     closeAllSelects(select)
     select.classList.toggle('is-open', shouldOpen)
     trigger.setAttribute('aria-expanded', String(shouldOpen))
     return
   }
-  const option = event.target.closest('.select-option')
+  const option = (event.target as HTMLElement).closest<HTMLElement>('.select-option')
   if (option) {
-    const select = option.closest('.md-select')
+    const select = option.closest<HTMLElement>('.md-select')!
     const setting = select.dataset.setting
-    const value = option.dataset.value
+    const value = option.dataset.value!
     if (setting === 'quality') state.quality = value
     if (setting === 'downloadType') state.type = value
     if (setting === 'cookieBrowser') state.cookieBrowser = value
-    if (setting === 'maxConcurrent') state.maxConcurrent = Math.max(1, Math.min(6, parseInt(value, 10) || 3))
-    if (setting === 'autoRetry') state.autoRetry = Math.max(0, Math.min(5, parseInt(value, 10) || 0))
+    if (setting === 'maxConcurrent') state.maxConcurrent = Math.max(1, Math.min(6, parseInt(value!, 10) || 3))
+    if (setting === 'autoRetry') state.autoRetry = Math.max(0, Math.min(5, parseInt(value!, 10) || 0))
     if (setting === 'videoCodec') state.videoCodec = value === 'hevc' ? 'hevc' : 'auto'
     if (setting === 'hevcEncoder') state.hevcEncoder = value === 'cpu' ? 'cpu' : 'auto'
     state.settingsDirty = true
-    select.querySelector('.select-current').textContent = option.querySelector('span').textContent
-    select.querySelectorAll('.select-option').forEach(item => {
+    select.querySelector<HTMLElement>('.select-current')!.textContent = option.querySelector<HTMLElement>('span')!.textContent
+    select.querySelectorAll<HTMLElement>('.select-option').forEach(item => {
       const selected = item === option
       item.classList.toggle('selected', selected)
       item.setAttribute('aria-selected', String(selected))
@@ -950,126 +980,126 @@ root.addEventListener('click', event => {
     if (setting === 'cookieBrowser') refreshBrowserRunning()
     return
   }
-  if (!event.target.closest('.md-select')) closeAllSelects()
+  if (!(event.target as HTMLElement).closest<HTMLElement>('.md-select')) closeAllSelects()
 })
 
 root.addEventListener('keydown', event => {
-  const select = event.target.closest('.md-select')
+  const select = (event.target as HTMLElement).closest<HTMLElement>('.md-select')
   if (!select) return
-  const options = [...select.querySelectorAll('.select-option')]
+  const options = [...select.querySelectorAll<HTMLElement>('.select-option')]
   const trigger = select.querySelector('.select-trigger')
-  if (event.target === trigger && ['ArrowDown', 'ArrowUp'].includes(event.key)) {
+  if (event.target === trigger && ['ArrowDown', 'ArrowUp'].includes((event as KeyboardEvent).key)) {
     event.preventDefault()
     closeAllSelects(select)
     select.classList.add('is-open')
-    trigger.setAttribute('aria-expanded', 'true')
+    trigger!.setAttribute('aria-expanded', 'true')
     const selectedIndex = Math.max(0, options.findIndex(option => option.getAttribute('aria-selected') === 'true'))
-    options[event.key === 'ArrowDown' ? selectedIndex : (selectedIndex || options.length - 1)].focus()
+    options[(event as KeyboardEvent).key === 'ArrowDown' ? selectedIndex : (selectedIndex || options.length - 1)].focus()
     return
   }
-  if (!event.target.matches('.select-option')) return
-  const index = options.indexOf(event.target)
-  if (event.key === 'Escape') { event.preventDefault(); closeSelect(select, true) }
-  else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+  if (!(event.target as HTMLElement).matches('.select-option')) return
+  const index = options.indexOf(event.target as HTMLElement)
+  if ((event as KeyboardEvent).key === 'Escape') { event.preventDefault(); closeSelect(select, true) }
+  else if ((event as KeyboardEvent).key === 'ArrowDown' || (event as KeyboardEvent).key === 'ArrowUp') {
     event.preventDefault()
-    options[(index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length].focus()
-  } else if (event.key === 'Home' || event.key === 'End') {
-    event.preventDefault(); options[event.key === 'Home' ? 0 : options.length - 1].focus()
+    options[(index + ((event as KeyboardEvent).key === 'ArrowDown' ? 1 : -1) + options.length) % options.length].focus()
+  } else if ((event as KeyboardEvent).key === 'Home' || (event as KeyboardEvent).key === 'End') {
+    event.preventDefault(); options[(event as KeyboardEvent).key === 'Home' ? 0 : options.length - 1].focus()
   }
 })
-document.addEventListener('pointerdown', event => { if (!event.target.closest('.md-select')) closeAllSelects() })
+document.addEventListener('pointerdown', event => { if (!(event.target as HTMLElement).closest<HTMLElement>('.md-select')) closeAllSelects() })
 
 function bind() {
   // 标题栏
-  document.querySelector('#themeToggle')?.addEventListener('click', toggleTheme)
-  document.querySelector('#minimizeWindow')?.addEventListener('click', () => window.runtime?.WindowMinimise?.())
-  document.querySelector('#maximizeWindow')?.addEventListener('click', () => { window.runtime?.WindowToggleMaximise?.(); setTimeout(syncWindowButtons, 80) })
-  document.querySelector('#closeWindow')?.addEventListener('click', () => window.runtime?.Quit?.())
-  document.querySelector('#windowTitlebar')?.addEventListener('dblclick', event => {
-    if (event.target.closest('.window-controls') || event.target.closest('.titlebar-tools')) return
+  $('#themeToggle')?.addEventListener('click', toggleTheme)
+  $('#minimizeWindow')?.addEventListener('click', () => window.runtime?.WindowMinimise?.())
+  $('#maximizeWindow')?.addEventListener('click', () => { window.runtime?.WindowToggleMaximise?.(); setTimeout(syncWindowButtons, 80) })
+  $('#closeWindow')?.addEventListener('click', () => window.runtime?.Quit?.())
+  $('#windowTitlebar')?.addEventListener('dblclick', event => {
+    if ((event.target as HTMLElement).closest<HTMLElement>('.window-controls') || (event.target as HTMLElement).closest<HTMLElement>('.titlebar-tools')) return
     window.runtime?.WindowToggleMaximise?.(); setTimeout(syncWindowButtons, 80)
   })
 
   // 下载页
-  document.querySelector('#stepAdd')?.addEventListener('click', () => {
-    if (state.queueStep !== 'add') { state.queueStep = 'add'; scrollReset = true; render(); document.querySelector('#linkInput')?.focus() }
+  $('#stepAdd')?.addEventListener('click', () => {
+    if (state.queueStep !== 'add') { state.queueStep = 'add'; scrollReset = true; render(); $('#linkInput')?.focus() }
   })
-  document.querySelector('#stepList')?.addEventListener('click', () => {
+  $('#stepList')?.addEventListener('click', () => {
     if (state.queueStep !== 'list') { state.queueStep = 'list'; scrollReset = true; render() }
   })
-  const linkInput = document.querySelector('#linkInput')
-  linkInput?.addEventListener('input', e => { state.draftLink = e.target.value })
-  linkInput?.addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') parseLinks() })
-  document.querySelector('#pasteLinks')?.addEventListener('click', pasteFromClipboard)
-  document.querySelector('#parseBtn')?.addEventListener('click', parseLinks)
-  document.querySelector('#searchInput')?.addEventListener('input', e => { state.filter = e.target.value; refreshQueueList() })
-  document.querySelector('#clearBtn')?.addEventListener('click', async () => {
-    if (backend()?.ClearTasks) applySnapshot(await backend().ClearTasks())
+  const linkInput = $('#linkInput')
+  linkInput?.addEventListener('input', e => { state.draftLink = (e.target as HTMLInputElement).value })
+  linkInput?.addEventListener('keydown', e => { if (e.ctrlKey && (e as KeyboardEvent).key === 'Enter') parseLinks() })
+  $('#pasteLinks')?.addEventListener('click', pasteFromClipboard)
+  $('#parseBtn')?.addEventListener('click', parseLinks)
+  $('#searchInput')?.addEventListener('input', e => { state.filter = (e.target as HTMLInputElement).value; refreshQueueList() })
+  $('#clearBtn')?.addEventListener('click', async () => {
+    if (backend()?.ClearTasks) applySnapshot(await backend()!.ClearTasks())
     else state.tasks = []
     render(); toast('下载队列已清空')
   })
-  document.querySelector('#openFolderBtn')?.addEventListener('click', openFolder)
-  document.querySelector('#engineSetupBanner')?.addEventListener('click', () => backend()?.OpenEngineDownloads?.())
-  document.querySelector('#ffmpegSetup')?.addEventListener('click', () => { state.ffmpegModal = true; render() })
+  $('#openFolderBtn')?.addEventListener('click', openFolder)
+  $('#engineSetupBanner')?.addEventListener('click', () => backend()?.OpenEngineDownloads?.())
+  $('#ffmpegSetup')?.addEventListener('click', () => { state.ffmpegModal = true; render() })
 
   // 设置页
-  document.querySelector('#resetSettings')?.addEventListener('click', resetSettings)
-  document.querySelector('#revertSettings')?.addEventListener('click', revertSettings)
-  document.querySelector('#saveSettings')?.addEventListener('click', saveSettings)
-  document.querySelector('#browseFolder')?.addEventListener('click', browse)
-  document.querySelector('#browseCookieFile')?.addEventListener('click', browseCookieFile)
-  document.querySelector('#openCookieFolder')?.addEventListener('click', () => backend()?.OpenCookieFolder?.())
-  document.querySelector('#folderPath')?.addEventListener('change', e => { state.folder = e.target.value; state.settingsDirty = true })
-  document.querySelector('#cookieFilePath')?.addEventListener('change', e => { state.cookieFile = e.target.value; state.settingsDirty = true })
-  document.querySelector('#highFrameRate')?.addEventListener('change', e => { state.highFrameRate = e.target.checked; state.settingsDirty = true })
-  document.querySelector('#openOnComplete')?.addEventListener('change', e => { state.openOnComplete = e.target.checked; state.settingsDirty = true })
-  document.querySelector('#proxyToggle')?.addEventListener('change', e => {
-    state.useProxy = e.target.checked
+  $('#resetSettings')?.addEventListener('click', resetSettings)
+  $('#revertSettings')?.addEventListener('click', revertSettings)
+  $('#saveSettings')?.addEventListener('click', saveSettings)
+  $('#browseFolder')?.addEventListener('click', browse)
+  $('#browseCookieFile')?.addEventListener('click', browseCookieFile)
+  $('#openCookieFolder')?.addEventListener('click', () => backend()?.OpenCookieFolder?.())
+  $('#folderPath')?.addEventListener('change', e => { state.folder = (e.target as HTMLInputElement).value; state.settingsDirty = true })
+  $('#cookieFilePath')?.addEventListener('change', e => { state.cookieFile = (e.target as HTMLInputElement).value; state.settingsDirty = true })
+  $('#highFrameRate')?.addEventListener('change', e => { state.highFrameRate = (e.target as HTMLInputElement).checked; state.settingsDirty = true })
+  $('#openOnComplete')?.addEventListener('change', e => { state.openOnComplete = (e.target as HTMLInputElement).checked; state.settingsDirty = true })
+  $('#proxyToggle')?.addEventListener('change', e => {
+    state.useProxy = (e.target as HTMLInputElement).checked
     state.settingsDirty = true
-    document.querySelector('#proxyAddressField')?.classList.toggle('hidden', !e.target.checked)
+    $('#proxyAddressField')?.classList.toggle('hidden', !(e.target as HTMLInputElement).checked)
   })
-  document.querySelector('#autoDetectToggle')?.addEventListener('change', e => { state.autoDetectProxy = e.target.checked; state.settingsDirty = true })
-  document.querySelector('#proxyURL')?.addEventListener('change', e => { state.proxyURL = e.target.value; state.settingsDirty = true })
-  document.querySelector('#testProxy')?.addEventListener('click', testProxy)
-  document.querySelector('#cookiesToggle')?.addEventListener('change', e => {
-    state.useBrowserCookie = e.target.checked
+  $('#autoDetectToggle')?.addEventListener('change', e => { state.autoDetectProxy = (e.target as HTMLInputElement).checked; state.settingsDirty = true })
+  $('#proxyURL')?.addEventListener('change', e => { state.proxyURL = (e.target as HTMLInputElement).value; state.settingsDirty = true })
+  $('#testProxy')?.addEventListener('click', testProxy)
+  $('#cookiesToggle')?.addEventListener('change', e => {
+    state.useBrowserCookie = (e.target as HTMLInputElement).checked
     state.settingsDirty = true
-    document.querySelector('#cookiePanel')?.classList.toggle('hidden', !e.target.checked)
-    if (e.target.checked) refreshBrowserRunning()
+    $('#cookiePanel')?.classList.toggle('hidden', !(e.target as HTMLInputElement).checked)
+    if ((e.target as HTMLInputElement).checked) refreshBrowserRunning()
   })
-  document.querySelector('#engineSetupBtn')?.addEventListener('click', () => backend()?.OpenEngineDownloads?.())
-  document.querySelector('#ffmpegManageBtn')?.addEventListener('click', () => { state.ffmpegModal = true; render() })
-  document.querySelector('#openDataFolder')?.addEventListener('click', openDataFolder)
+  $('#engineSetupBtn')?.addEventListener('click', () => backend()?.OpenEngineDownloads?.())
+  $('#ffmpegManageBtn')?.addEventListener('click', () => { state.ffmpegModal = true; render() })
+  $('#openDataFolder')?.addEventListener('click', openDataFolder)
 
   // 关于页
-  document.querySelector('#linkGithub')?.addEventListener('click', () => backend()?.OpenProjectRepo?.())
-  document.querySelector('#linkCnb')?.addEventListener('click', () => backend()?.OpenCNBRepo?.())
-  document.querySelector('#linkBilibili')?.addEventListener('click', () => backend()?.OpenBilibili?.())
-  document.querySelector('#linkHomepage')?.addEventListener('click', () => backend()?.OpenHomepage?.())
+  $('#linkGithub')?.addEventListener('click', () => backend()?.OpenProjectRepo?.())
+  $('#linkCnb')?.addEventListener('click', () => backend()?.OpenCNBRepo?.())
+  $('#linkBilibili')?.addEventListener('click', () => backend()?.OpenBilibili?.())
+  $('#linkHomepage')?.addEventListener('click', () => backend()?.OpenHomepage?.())
 
   // 版本更新
-  document.querySelector('#checkUpdateBtn')?.addEventListener('click', () => checkUpdate(true))
-  document.querySelector('#downloadUpdateBtn')?.addEventListener('click', downloadUpdate)
-  document.querySelector('#installUpdateBtn')?.addEventListener('click', installUpdate)
-  document.querySelector('#openReleaseBtn')?.addEventListener('click', () => {
+  $('#checkUpdateBtn')?.addEventListener('click', () => checkUpdate(true))
+  $('#downloadUpdateBtn')?.addEventListener('click', downloadUpdate)
+  $('#installUpdateBtn')?.addEventListener('click', installUpdate)
+  $('#openReleaseBtn')?.addEventListener('click', () => {
     const url = state.updatePageUrl || state.updateUrl
     if (url) backend()?.OpenUpdatePage?.(url)
   })
 
   // FFmpeg 弹窗
-  document.querySelector('#closeFFmpegModal')?.addEventListener('click', closeFFmpegModal)
-  document.querySelector('#ffmpegModalCancel')?.addEventListener('click', closeFFmpegModal)
-  document.querySelector('#ffmpegBackdrop')?.addEventListener('click', e => { if (e.target.id === 'ffmpegBackdrop') closeFFmpegModal() })
-  document.querySelector('#ffmpegAutoInstall')?.addEventListener('click', installFFmpeg)
-  document.querySelector('#ffmpegImportArchive')?.addEventListener('click', importFFmpegArchive)
-  document.querySelector('#ffmpegPickFile')?.addEventListener('click', pickFFmpegFile)
+  $('#closeFFmpegModal')?.addEventListener('click', closeFFmpegModal)
+  $('#ffmpegModalCancel')?.addEventListener('click', closeFFmpegModal)
+  $('#ffmpegBackdrop')?.addEventListener('click', e => { if ((e.target as HTMLElement).id === 'ffmpegBackdrop') closeFFmpegModal() })
+  $('#ffmpegAutoInstall')?.addEventListener('click', installFFmpeg)
+  $('#ffmpegImportArchive')?.addEventListener('click', importFFmpegArchive)
+  $('#ffmpegPickFile')?.addEventListener('click', pickFFmpegFile)
 }
 
 async function syncWindowButtons() {
   if (!window.runtime?.WindowIsMaximised) return
   try {
     state.windowMaximized = await window.runtime.WindowIsMaximised()
-    const button = document.querySelector('#maximizeWindow')
+    const button = $('#maximizeWindow')
     if (button) {
       button.innerHTML = icon(state.windowMaximized ? 'restore' : 'maximize', 13)
       button.title = state.windowMaximized ? '还原' : '最大化'
@@ -1103,7 +1133,7 @@ const MANY_VIDEOS_PATTERNS = [
   /[?&]sid=/,            // B 站合集参数
   /[?&]season_id=/,
 ]
-const looksLikeManyVideos = (raw) => {
+const looksLikeManyVideos = (raw: string) => {
   try {
     const u = new URL(raw)
     // 域名也要参与匹配:B 站 UP 主空间是 space.bilibili.com/<数字>，特征在 host 上
@@ -1113,9 +1143,9 @@ const looksLikeManyVideos = (raw) => {
 }
 
 async function parseLinks() {
-  const input = document.querySelector('#linkInput')
+  const input = $('#linkInput')
   const raw = (state.draftLink || '').trim()
-  const parts = raw.split(/[\n\r\t ,;]+/).map(s => s.trim()).filter(Boolean)
+  const parts: string[] = raw.split(/[\n\r\t ,;]+/).map((s: string) => s.trim()).filter(Boolean)
   const urls = parts.filter(isSupportedURL)
   let list = urls
   if (state.linkMode === 'single') {
@@ -1129,9 +1159,10 @@ async function parseLinks() {
     return
   }
   let snapshot
-  if (backend()?.AddLinks) snapshot = await backend().AddLinks(list.join('\n'))
+  if (backend()?.AddLinks) snapshot = await backend()!.AddLinks(list.join('\n'))
   else {
-    const fresh = list.map((url, i) => ({ id: Date.now() + i, url, title: '正在获取视频信息…', status: '等待中', progress: 0, quality: state.quality }))
+    // 没有后端桥时(浏览器里调试)的兜底:先造占位任务,后端就绪后会用真实快照覆盖
+    const fresh: Task[] = list.map((url: string, i: number) => ({ id: Date.now() + i, url, title: '正在获取视频信息…', status: '等待中', progress: 0, quality: state.quality, createdAt: '' } as Task))
     state.tasks.unshift(...fresh)
   }
   if (snapshot) applySnapshot(snapshot)
@@ -1156,28 +1187,28 @@ async function pasteFromClipboard() {
   const existing = state.draftLink.trim()
   state.draftLink = existing ? existing + '\n' + text : text
   render()
-  const input = document.querySelector('#linkInput')
+  const input = $<HTMLInputElement>('#linkInput')
   input?.focus()
   input?.setSelectionRange(state.draftLink.length, state.draftLink.length)
 }
 
-async function handleTask(action, id) {
+async function handleTask(action: string, id: number) {
   const t = state.tasks.find(x => x.id === id)
   if (action === 'remove') {
-    if (backend()?.RemoveTask) applySnapshot(await backend().RemoveTask(id))
+    if (backend()?.RemoveTask) applySnapshot(await backend()!.RemoveTask(id))
     else state.tasks = state.tasks.filter(x => x.id !== id)
     render(); toast('已从队列移除'); return
   }
   if (!t) return
   if (action === 'start') {
     if (t.status === '已完成') { toast('该任务已经下载完毕'); return }
-    if (backend()?.StartTask) applySnapshot(await backend().StartTask(id))
+    if (backend()?.StartTask) applySnapshot(await backend()!.StartTask(id))
     else { t.status = '失败'; t.error = '桌面版下载引擎尚未配置' }
     const fresh = state.tasks.find(x => x.id === id)
     toast(fresh && fresh.status === '失败' ? '下载引擎尚未配置' : '任务已开始')
   }
   if (action === 'pause') {
-    if (backend()?.PauseTask) applySnapshot(await backend().PauseTask(id))
+    if (backend()?.PauseTask) applySnapshot(await backend()!.PauseTask(id))
     else t.status = '已暂停'
     toast('下载已暂停')
   }
@@ -1190,33 +1221,33 @@ async function startAll() {
     toast(state.tasks.some(t => t.status === '已完成') ? '已经下载完毕' : '没有可开始的任务')
     return
   }
-  if (backend()?.StartAllTasks) applySnapshot(await backend().StartAllTasks())
+  if (backend()?.StartAllTasks) applySnapshot(await backend()!.StartAllTasks())
   else toast('全部开始需要在桌面程序中运行')
   render()
 }
 
 async function pauseAll() {
-  if (backend()?.PauseAllTasks) applySnapshot(await backend().PauseAllTasks())
+  if (backend()?.PauseAllTasks) applySnapshot(await backend()!.PauseAllTasks())
   else state.tasks.forEach(t => { if (t.status === '准备中') t.status = '已暂停' })
   render(); toast('下载任务已暂停')
 }
 
 async function openFolder() {
   if (backend()?.OpenDownloadFolder) {
-    try { await backend().OpenDownloadFolder() } catch (error) { toast(`无法打开文件夹：${error.message}`) }
+    try { await backend()!.OpenDownloadFolder() } catch (error) { toast(`无法打开文件夹：${(error as Error).message}`) }
   } else toast('请在桌面版中打开下载文件夹')
 }
 
 async function openDataFolder() {
   if (backend()?.OpenDataFolder) {
-    try { await backend().OpenDataFolder() } catch (error) { toast(`无法打开数据目录：${error.message}`) }
+    try { await backend()!.OpenDataFolder() } catch (error) { toast(`无法打开数据目录：${(error as Error).message}`) }
   } else toast('请在桌面版中打开数据目录')
 }
 
 // ============================================================
 // 版本更新
 // ============================================================
-async function checkUpdate(manual) {
+async function checkUpdate(manual = false) {
   const api = backend()
   if (!api?.CheckUpdate) { if (manual) toast('请在桌面版中检查更新'); return }
   if (state.updateChecking) return
@@ -1250,7 +1281,7 @@ async function checkUpdate(manual) {
     state.updateChecking = false
     state.updateChecked = true
     state.updateHas = false
-    state.updateError = error.message || '检查更新失败'
+    state.updateError = (error as Error).message || '检查更新失败'
     if (manual) toast(`检查更新失败：${state.updateError}`)
   }
   markUpdateBadge()
@@ -1280,7 +1311,7 @@ async function downloadUpdate() {
     toast(state.updateError)
   } catch (error) {
     state.updatePhase = ''
-    state.updateError = error.message || '下载更新失败'
+    state.updateError = (error as Error).message || '下载更新失败'
     renderUpdateArea()
     toast(`下载更新失败：${state.updateError}`)
   }
@@ -1307,7 +1338,7 @@ async function installUpdate() {
     renderUpdateArea()
   } catch (error) {
     state.updatePhase = 'downloaded'
-    state.updateError = error.message || '无法启动安装程序'
+    state.updateError = (error as Error).message || '无法启动安装程序'
     renderUpdateArea()
     toast(`无法启动安装程序：${state.updateError}`)
   }
@@ -1316,21 +1347,21 @@ async function installUpdate() {
 // renderUpdateArea 只重绘关于页的更新区块,避免整页重绘打断交互。
 function renderUpdateArea() {
   if (state.page !== 'about') return
-  const btn = document.querySelector('#checkUpdateBtn')
+  const btn = $('#checkUpdateBtn')
   if (btn) {
-    btn.disabled = state.updateChecking
+    (btn as HTMLButtonElement).disabled = state.updateChecking
     btn.textContent = state.updateChecking ? '检查中…' : '检查更新'
   }
-  const block = document.querySelector('#updateArea')
+  const block = $('#updateArea')
   if (!block) { render(); return }
   block.outerHTML = `<div id="updateArea">${renderUpdateBlock()}</div>`
   bindUpdateArea()
 }
 
 function bindUpdateArea() {
-  document.querySelector('#downloadUpdateBtn')?.addEventListener('click', downloadUpdate)
-  document.querySelector('#installUpdateBtn')?.addEventListener('click', installUpdate)
-  document.querySelector('#openReleaseBtn')?.addEventListener('click', () => {
+  $('#downloadUpdateBtn')?.addEventListener('click', downloadUpdate)
+  $('#installUpdateBtn')?.addEventListener('click', installUpdate)
+  $('#openReleaseBtn')?.addEventListener('click', () => {
     const url = state.updatePageUrl || state.updateUrl
     if (url) backend()?.OpenUpdatePage?.(url)
   })
@@ -1393,19 +1424,19 @@ async function browseCookieFile() {
     state.settingsDirty = true
     render()
     toast(result.note ? `已选择 Cookies 文件：${result.note}` : '已选择 Cookies 文件')
-  } catch (error) { toast(`选择文件失败：${error.message}`) }
+  } catch (error) { toast(`选择文件失败：${(error as Error).message}`) }
 }
 
-function setCookieSource(source) {
+function setCookieSource(source: string) {
   state.cookieSource = source
   state.settingsDirty = true
-  root.querySelectorAll('.cookie-tab').forEach(tab => {
+  root.querySelectorAll<HTMLElement>('.cookie-tab').forEach(tab => {
     const active = tab.dataset.cookieSource === source
     tab.classList.toggle('active', active)
     tab.setAttribute('aria-selected', String(active))
   })
-  document.querySelector('#cookieSourceBrowser')?.classList.toggle('hidden', source !== 'browser')
-  document.querySelector('#cookieSourceFile')?.classList.toggle('hidden', source !== 'file')
+  $('#cookieSourceBrowser')?.classList.toggle('hidden', source !== 'browser')
+  $('#cookieSourceFile')?.classList.toggle('hidden', source !== 'file')
   if (source === 'browser') refreshBrowserRunning()
   else refreshCookieStatus()
 }
@@ -1424,13 +1455,13 @@ async function refreshCookieStatus() {
 
 // patchCookiePlatforms 只替换分站点列表，避免整页重绘打断正在编辑的输入框。
 function patchCookiePlatforms() {
-  const list = document.querySelector('.cookie-plat-list')
+  const list = $('.cookie-plat-list')
   if (!list) return
   list.innerHTML = state.cookiePlatforms.map(renderCookiePlatformRow).join('')
 }
 
 // importPlatformCookie 选择一个 cookies.txt，由后端识别站点并分别保存。
-async function importPlatformCookie(platformId) {
+async function importPlatformCookie(platformId: string) {
   const api = backend()
   if (!api?.ImportPlatformCookie) { toast('桌面版中可使用文件选择器'); return }
   state.cookieBusy = platformId || ''
@@ -1453,12 +1484,12 @@ async function importPlatformCookie(platformId) {
   } catch (error) {
     state.cookieBusy = ''
     patchCookiePlatforms()
-    toast(`导入失败：${error.message}`)
+    toast(`导入失败：${(error as Error).message}`)
   }
 }
 
 // removePlatformCookie 删除某个站点已保存的 Cookies。
-async function removePlatformCookie(platformId) {
+async function removePlatformCookie(platformId: string) {
   const api = backend()
   if (!api?.RemovePlatformCookie) return
   const target = state.cookiePlatforms.find(p => p.id === platformId)
@@ -1473,7 +1504,7 @@ async function removePlatformCookie(platformId) {
   } catch (error) {
     state.cookieBusy = ''
     patchCookiePlatforms()
-    toast(`移除失败：${error.message}`)
+    toast(`移除失败：${(error as Error).message}`)
   }
 }
 
@@ -1485,7 +1516,7 @@ async function refreshBrowserRunning() {
     const running = await api.CheckBrowserRunning(state.cookieBrowser)
     if (running !== state.browserRunning) {
       state.browserRunning = running
-      const hint = document.querySelector('#browserRunningHint')
+      const hint = $('#browserRunningHint')
       if (hint) {
         hint.classList.toggle('warn', running)
         hint.textContent = running
@@ -1500,14 +1531,14 @@ async function saveSettings() {
   const settings = {
     quality: state.quality,
     downloadType: state.type,
-    downloadDir: document.querySelector('#folderPath')?.value || state.folder,
+    downloadDir: $<HTMLInputElement>('#folderPath')?.value || state.folder,
     useProxy: state.useProxy,
-    proxyURL: document.querySelector('#proxyURL')?.value || state.proxyURL,
+    proxyURL: $<HTMLInputElement>('#proxyURL')?.value || state.proxyURL,
     autoDetectProxy: state.autoDetectProxy,
     useBrowserCookie: state.useBrowserCookie,
     cookieSource: state.cookieSource,
     cookieBrowser: state.cookieBrowser,
-    cookieFile: document.querySelector('#cookieFilePath')?.value || state.cookieFile,
+    cookieFile: $<HTMLInputElement>('#cookieFilePath')?.value || state.cookieFile,
     ffmpegPath: state.ffmpegPath,
     highFrameRate: state.highFrameRate,
     openOnComplete: state.openOnComplete,
@@ -1519,7 +1550,7 @@ async function saveSettings() {
   state.folder = settings.downloadDir
   state.proxyURL = settings.proxyURL
   state.settingsDirty = false
-  if (backend()?.SaveSettings) applySnapshot(await backend().SaveSettings(settings))
+  if (backend()?.SaveSettings) applySnapshot(await backend()!.SaveSettings(settings))
   state.encoderHint = ''
   state.settingsBaseline = settingsSnapshot()
   await refreshSystemStatus()
@@ -1528,7 +1559,7 @@ async function saveSettings() {
 
 // 检测并展示可用的 H.265 显卡编码器(探测结果由后端缓存,仅首次较慢)
 async function refreshEncoderHint() {
-  const el = document.querySelector('#encoderHint')
+  const el = $('#encoderHint')
   if (!el) return
   if (state.encoderHint) { el.textContent = state.encoderHint; return }
   el.textContent = '正在检测显卡编码器…'
@@ -1541,7 +1572,7 @@ async function refreshEncoderHint() {
     else if (st.gpu) text = `已检测到 ${st.label}，转码速度更快`
     else text = st.message || '未检测到可用的显卡编码器，将使用 CPU 转码'
     state.encoderHint = text
-    const live = document.querySelector('#encoderHint')
+    const live = $('#encoderHint')
     if (live) live.textContent = text
   } catch { el.textContent = '' }
 }
@@ -1550,12 +1581,12 @@ async function testProxy() {
   if (!state.useProxy) { toast('请先启用代理并填写代理地址'); return }
   if (backend()?.TestProxy) {
     try {
-      const result = await backend().TestProxy(document.querySelector('#proxyURL')?.value || state.proxyURL)
+      const result = await backend()!.TestProxy($<HTMLInputElement>('#proxyURL')?.value || state.proxyURL)
       state.proxyChecked = true
       state.proxyReady = !!result.ok
       state.proxyMessage = result.message
       render(); toast(result.message)
-    } catch (error) { toast(`代理测试失败：${error.message}`) }
+    } catch (error) { toast(`代理测试失败：${(error as Error).message}`) }
   } else toast('代理测试仅在桌面版可用')
 }
 
@@ -1565,7 +1596,7 @@ async function testProxy() {
 async function refreshSystemStatus() {
   if (!backend()?.GetSystemStatus) return
   try {
-    const status = await backend().GetSystemStatus()
+    const status = await backend()!.GetSystemStatus()
     state.engineReady = !!status.engineReady
     state.engineError = status.engineError || ''
     state.ffmpegReady = !!status.ffmpegReady
@@ -1588,7 +1619,7 @@ function closeFFmpegModal() {
   render()
 }
 
-async function finishFFmpegResult(result) {
+async function finishFFmpegResult(result: any) {
   if (result && result.canceled) {
     state.ffmpegBusy = false
     state.ffmpegPhase = ''
@@ -1640,7 +1671,7 @@ async function installFFmpeg() {
     state.ffmpegPhase = ''
     state.ffmpegMessage = ''
     render()
-    toast('安装失败：' + (error.message || '未知错误'))
+    toast('安装失败：' + ((error as Error).message || '未知错误'))
   }
 }
 
@@ -1660,7 +1691,7 @@ async function importFFmpegArchive() {
     state.ffmpegPhase = ''
     state.ffmpegMessage = ''
     render()
-    toast('导入失败：' + (error.message || '未知错误'))
+    toast('导入失败：' + ((error as Error).message || '未知错误'))
   }
 }
 
@@ -1680,15 +1711,15 @@ async function pickFFmpegFile() {
     } else {
       toast((result && result.message) || '所选文件无效')
     }
-  } catch (error) { toast('选择失败：' + (error.message || '未知错误')) }
+  } catch (error) { toast('选择失败：' + ((error as Error).message || '未知错误')) }
 }
 
 function updateFFmpegProgressUI() {
-  const bar = document.querySelector('#ffmpegProgressBar')
+  const bar = $('#ffmpegProgressBar')
   if (!bar) return
-  const track = bar.closest('.ff-track')
-  const pct = document.querySelector('#ffmpegProgressPct')
-  const label = document.querySelector('#ffmpegProgressLabel')
+  const track = bar.closest<HTMLElement>('.ff-track')
+  const pct = $('#ffmpegProgressPct')
+  const label = $('#ffmpegProgressLabel')
   const indeterminate = state.ffmpegPhase === 'extract' && state.ffmpegProgress < 100
   track?.classList.toggle('indeterminate', indeterminate)
   bar.style.width = state.ffmpegProgress + '%'
@@ -1704,7 +1735,7 @@ refreshSnapshot()
 refreshSystemStatus()
 setInterval(() => { if (state.page === 'settings') refreshBrowserRunning() }, 4000)
 document.addEventListener('contextmenu', event => {
-  if (event.target.closest('input, textarea')) return
+  if ((event.target as HTMLElement).closest<HTMLElement>('input, textarea')) return
   event.preventDefault()
 })
 window.addEventListener('resize', syncWindowButtons)
@@ -1714,7 +1745,7 @@ if (window.runtime?.EventsOn) {
     applySnapshot(snapshot)
     if (state.page === 'downloads') patchDownloads()
     else {
-      const badge = document.querySelector('.nav-item[data-page="downloads"] em')
+      const badge = $('.nav-item[data-page="downloads"] em')
       if (badge) badge.textContent = state.tasks.length ? String(state.tasks.length) : ''
     }
   })
@@ -1723,7 +1754,7 @@ if (window.runtime?.EventsOn) {
     if (typeof data.percent === 'number') state.ffmpegProgress = data.percent
     if (data.phase) state.ffmpegPhase = data.phase
     if (data.message) state.ffmpegMessage = data.message
-    if (!document.querySelector('#ffmpegProgressBar')) { render(); return }
+    if (!$('#ffmpegProgressBar')) { render(); return }
     updateFFmpegProgressUI()
   })
   window.runtime.EventsOn('update:progress', (data) => {
@@ -1731,12 +1762,12 @@ if (window.runtime?.EventsOn) {
     if (typeof data.percent === 'number') state.updateProgress = data.percent
     if (data.message) state.updateMessage = data.message
     if (state.updatePhase !== 'downloading') return
-    const bar = document.querySelector('#updateProgressBar')
+    const bar = $('#updateProgressBar')
     if (!bar) return
     bar.style.width = state.updateProgress + '%'
-    const pct = document.querySelector('#updateProgressPct')
+    const pct = $('#updateProgressPct')
     if (pct) pct.textContent = state.updateProgress > 0 ? state.updateProgress + '%' : ''
-    const label = document.querySelector('#updateProgressLabel')
+    const label = $('#updateProgressLabel')
     if (label && state.updateMessage) label.textContent = state.updateMessage
   })
 }
@@ -1764,7 +1795,7 @@ setTimeout(async () => {
 
 // markUpdateBadge 在侧边栏「关于」上加/去提示点。
 function markUpdateBadge() {
-  const nav = document.querySelector('.nav-item[data-page="about"]')
+  const nav = $('.nav-item[data-page="about"]')
   if (!nav) return
   const existing = nav.querySelector('.nav-badge')
   if (state.updateHas && !existing) {
