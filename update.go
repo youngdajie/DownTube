@@ -293,24 +293,24 @@ func (a *App) githubLatestRelease(proxyURL string) (version, notes, downloadURL,
 	return version, strings.TrimSpace(payload.Body), downloadURL, pageURL, nil
 }
 
-func updateResult(ok, hasUpdate bool, current, latest, notes, downloadURL, pageURL, source, errText string) map[string]any {
-	return map[string]any{
-		"ok":        ok,
-		"hasUpdate": hasUpdate,
-		"current":   current,
-		"latest":    latest,
-		"notes":     notes,
-		"url":       downloadURL,
-		"pageUrl":   pageURL,
-		"source":    source,
-		"error":     errText,
+func updateResult(ok, hasUpdate bool, current, latest, notes, downloadURL, pageURL, source, errText string) UpdateResult {
+	return UpdateResult{
+		OK:        ok,
+		HasUpdate: hasUpdate,
+		Current:   current,
+		Latest:    latest,
+		Notes:     notes,
+		URL:       downloadURL,
+		PageURL:   pageURL,
+		Source:    source,
+		Error:     errText,
 	}
 }
 
 // CheckUpdate 检查是否有新版本。current 由界面传入(wails.json 注入的那份)。
 // 判定规则:CNB 版本号 > 当前版本,且对应安装包已挂到 Release 才算「可更新」;
 // CNB 不通或安装包未就绪时,再问 GitHub。
-func (a *App) CheckUpdate(current string) map[string]any {
+func (a *App) CheckUpdate(current string) UpdateResult {
 	current = strings.TrimSpace(current)
 	if current == "" {
 		return updateResult(false, false, "", "", "", "", "", "", "无法确定当前版本")
@@ -353,19 +353,19 @@ func (a *App) CheckUpdate(current string) map[string]any {
 // DownloadUpdate 下载安装包到临时目录,进度通过 update:progress 事件上报。
 // url 必须来自官方发布渠道(见 allowedUpdateHost);version 用于命名与校验。
 // 通道不通时会自动尝试另一个官方源(CNB ↔ GitHub),国内直连 CNB 更快。
-func (a *App) DownloadUpdate(rawURL, version string) map[string]any {
+func (a *App) DownloadUpdate(rawURL, version string) UpdateDownloadResult {
 	version = strings.TrimSpace(version)
 	if !updateVersionPattern.MatchString(version) {
-		return map[string]any{"ok": false, "error": "版本号格式不正确"}
+		return UpdateDownloadResult{OK: false, Error: "版本号格式不正确"}
 	}
 	if !allowedUpdateHost(rawURL) {
-		return map[string]any{"ok": false, "error": "不接受该下载地址"}
+		return UpdateDownloadResult{OK: false, Error: "不接受该下载地址"}
 	}
 
 	a.mu.Lock()
 	if a.updateDownloading {
 		a.mu.Unlock()
-		return map[string]any{"ok": false, "error": "正在下载更新,请稍候"}
+		return UpdateDownloadResult{OK: false, Error: "正在下载更新,请稍候"}
 	}
 	a.updateDownloading = true
 	useProxy, proxyURL := a.store.Settings.UseProxy, a.store.Settings.ProxyURL
@@ -381,7 +381,7 @@ func (a *App) DownloadUpdate(rawURL, version string) map[string]any {
 
 	targetDir := filepath.Join(os.TempDir(), updateTempDir)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return map[string]any{"ok": false, "error": "无法创建临时目录:" + err.Error()}
+		return UpdateDownloadResult{OK: false, Error: "无法创建临时目录:" + err.Error()}
 	}
 	dest := filepath.Join(targetDir, fmt.Sprintf(updateAssetName, version))
 
@@ -393,7 +393,7 @@ func (a *App) DownloadUpdate(rawURL, version string) map[string]any {
 			size = info.Size()
 		}
 		a.emitUpdateProgress("downloaded", size, size, "安装包已就绪")
-		return map[string]any{"ok": true, "path": dest, "size": size, "reused": true}
+		return UpdateDownloadResult{OK: true, Path: dest, Size: size, Reused: true}
 	}
 
 	// 主源 + 备用源:同一版本在两个平台都有安装包,一路失败自动换另一路。
@@ -424,10 +424,10 @@ func (a *App) DownloadUpdate(rawURL, version string) map[string]any {
 			size = info.Size()
 		}
 		a.emitUpdateProgress("downloaded", size, size, "下载完成")
-		return map[string]any{"ok": true, "path": dest, "size": size}
+		return UpdateDownloadResult{OK: true, Path: dest, Size: size}
 	}
 	_ = os.Remove(dest)
-	return map[string]any{"ok": false, "error": "下载失败:" + lastErr + "(可稍后重试,或在设置中配置代理)"}
+	return UpdateDownloadResult{OK: false, Error: "下载失败:" + lastErr + "(可稍后重试,或在设置中配置代理)"}
 }
 
 // downloadUpdateFile 单文件下载,每 200ms 上报一次进度。
@@ -517,17 +517,17 @@ func validateInstallerFile(path string) error {
 // InstallUpdate 以管理员权限静默启动已下载的安装包(会弹一次 UAC 确认)。
 // 安装程序随后会结束本进程、覆盖文件并在安装完成后重新拉起新版。
 // 若用户在 UAC 中取消,这里会返回错误,应用保持运行不受影响。
-func (a *App) InstallUpdate(version string) map[string]any {
+func (a *App) InstallUpdate(version string) UpdateInstallResult {
 	version = strings.TrimSpace(version)
 	if !updateVersionPattern.MatchString(version) {
-		return map[string]any{"ok": false, "error": "版本号格式不正确"}
+		return UpdateInstallResult{OK: false, Error: "版本号格式不正确"}
 	}
 	path := filepath.Join(os.TempDir(), updateTempDir, fmt.Sprintf(updateAssetName, version))
 	if err := validateInstallerFile(path); err != nil {
-		return map[string]any{"ok": false, "error": "安装包已失效,请重新下载"}
+		return UpdateInstallResult{OK: false, Error: "安装包已失效,请重新下载"}
 	}
 	if err := launchInstallerElevated(path); err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+		return UpdateInstallResult{OK: false, Error: err.Error()}
 	}
 	a.emitUpdateProgress("install", 0, 0, "安装程序已启动")
 	// 安装程序已接手:稍候主动退出,让它顺利覆盖文件并重启新版。
@@ -537,7 +537,7 @@ func (a *App) InstallUpdate(version string) map[string]any {
 			runtime.Quit(a.ctx)
 		}
 	}()
-	return map[string]any{"ok": true}
+	return UpdateInstallResult{OK: true}
 }
 
 // OpenUpdatePage 打开发布页(网络受限或自动下载失败时的手动入口)。

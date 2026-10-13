@@ -29,54 +29,18 @@ declare global {
   /** 后端快照 */
   type Snapshot = main.Snapshot
 
-  /** 更新检查返回的结构(Go 侧是 map,没有生成类型) */
-  interface UpdateInfo {
-    hasUpdate?: boolean
-    checked?: boolean
-    latest?: string
-    current?: string
-    notes?: string
-    url?: string
-    size?: number
-    publishedAt?: string
-    error?: string
-    ok?: boolean
-    [key: string]: any
-  }
-
-  /** 系统状态(Go 侧是 map) */
-  interface SystemStatus {
-    engineReady?: boolean
-    enginePath?: string
-    engineError?: string
-    ffmpegReady?: boolean
-    ffmpegPath?: string
-    ffmpegError?: string
-    ffmpegVersion?: string
-    proxyChecked?: boolean
-    proxyReady?: boolean
-    proxyMessage?: string
-    dataDir?: string
-    [key: string]: any
-  }
-
-  /** 显卡编码器状态 */
-  interface EncoderStatus {
-    available?: boolean
-    encoder?: string
-    hint?: string
-    [key: string]: any
-  }
-
-  /** Cookies 状态 */
-  interface CookieStatus {
-    dir?: string
-    platforms?: Array<{ id?: string; label?: string; file?: string; count?: number; [key: string]: any }>
-    [key: string]: any
-  }
-
-  /** 单个站点的 Cookies 条目 */
-  type CookiePlatform = NonNullable<CookieStatus['platforms']>[number]
+  // 下面这几个都来自 Wails 生成的 models.ts(Go 侧原本返回 map[string]any,
+  // 已在 contracts.go 里改成结构体)。用 type 别名导出,免得 main.ts 里到处写 main. 前缀。
+  /** 单个站点的 Cookies 状态(generated) */
+  type CookiePlatform = main.CookiePlatformStatus
+  /** CookieStatus 的返回(generated) */
+  type CookieStatus = main.CookieStatusResult
+  /** 系统状态(generated) */
+  type SystemStatus = main.SystemStatus
+  /** 显卡编码器状态(generated) */
+  type EncoderStatus = main.EncoderStatus
+  /** 检查更新结果(generated) */
+  type UpdateInfo = main.UpdateResult
 
   /** 自定义下拉控件的选项:纯字符串,或 { value, label } */
   type SelectOption = string | { value: string; label: string; [key: string]: any }

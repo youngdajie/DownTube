@@ -239,22 +239,22 @@ func TestCookieImportRoundTrip(t *testing.T) {
 
 	// CookieStatus 要如实反映导入状态,供设置页展示
 	status := (&App{}).CookieStatus()
-	list, _ := status["platforms"].([]map[string]any)
+	list := status.Platforms
 	if len(list) != 2 {
 		t.Fatalf("状态应包含 2 个站点,得到 %d", len(list))
 	}
 	for _, item := range list {
-		if item["id"] == "youtube" && item["imported"] != true {
+		if item.ID == "youtube" && item.Imported != true {
 			t.Error("YouTube 应显示为已导入")
 		}
-		if item["id"] == "youtube" && item["count"] != 2 {
-			t.Errorf("YouTube 条数应为 2,得到 %v", item["count"])
+		if item.ID == "youtube" && item.Count != 2 {
+			t.Errorf("YouTube 条数应为 2,得到 %v", item.Count)
 		}
-		if item["id"] == "bilibili" && item["count"] != 1 {
-			t.Errorf("哔哩哔哩条数应为 1,得到 %v", item["count"])
+		if item.ID == "bilibili" && item.Count != 1 {
+			t.Errorf("哔哩哔哩条数应为 1,得到 %v", item.Count)
 		}
 	}
-	if status["dir"] == "" {
+	if status.Dir == "" {
 		t.Error("状态里应带上 Cookies 目录路径")
 	}
 }
@@ -333,18 +333,18 @@ func TestRemovePlatformCookie(t *testing.T) {
 	}
 
 	app := &App{}
-	if res := app.RemovePlatformCookie("youtube"); res["ok"] != true {
+	if res := app.RemovePlatformCookie("youtube"); res.OK != true {
 		t.Fatalf("移除应成功,得到 %v", res)
 	}
 	if platformCookieFile("https://www.youtube.com/watch?v=x") != "" {
 		t.Fatal("移除后不应再解析到 Cookies 文件")
 	}
 	// 重复移除应当幂等,不报错
-	if res := app.RemovePlatformCookie("youtube"); res["ok"] != true {
+	if res := app.RemovePlatformCookie("youtube"); res.OK != true {
 		t.Fatalf("重复移除应保持成功,得到 %v", res)
 	}
 	// 未知站点应被拒绝
-	if res := app.RemovePlatformCookie("nope"); res["ok"] != false {
+	if res := app.RemovePlatformCookie("nope"); res.OK != false {
 		t.Fatalf("未知站点应被拒绝,得到 %v", res)
 	}
 }

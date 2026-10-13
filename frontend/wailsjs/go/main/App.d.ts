@@ -6,29 +6,29 @@ export function AddLinks(arg1:string):Promise<main.Snapshot>;
 
 export function CheckBrowserRunning(arg1:string):Promise<boolean>;
 
-export function CheckUpdate(arg1:string):Promise<Record<string, any>>;
+export function CheckUpdate(arg1:string):Promise<main.UpdateResult>;
 
 export function ClearTasks():Promise<main.Snapshot>;
 
-export function CookieStatus():Promise<Record<string, any>>;
+export function CookieStatus():Promise<main.CookieStatusResult>;
 
-export function DownloadUpdate(arg1:string,arg2:string):Promise<Record<string, any>>;
+export function DownloadUpdate(arg1:string,arg2:string):Promise<main.UpdateDownloadResult>;
 
-export function GetHEVCEncoderStatus():Promise<Record<string, any>>;
+export function GetHEVCEncoderStatus():Promise<main.EncoderStatus>;
 
 export function GetSettings():Promise<main.Settings>;
 
-export function GetSystemStatus():Promise<Record<string, any>>;
+export function GetSystemStatus():Promise<main.SystemStatus>;
 
 export function GetTasks():Promise<Array<main.Task>>;
 
-export function ImportFFmpegArchive():Promise<Record<string, any>>;
+export function ImportFFmpegArchive():Promise<main.FFmpegInstallResult>;
 
-export function ImportPlatformCookie():Promise<Record<string, any>>;
+export function ImportPlatformCookie():Promise<main.CookieImportResult>;
 
-export function InstallFFmpeg():Promise<Record<string, any>>;
+export function InstallFFmpeg():Promise<main.FFmpegInstallResult>;
 
-export function InstallUpdate(arg1:string):Promise<Record<string, any>>;
+export function InstallUpdate(arg1:string):Promise<main.UpdateInstallResult>;
 
 export function OpenBilibili():Promise<void>;
 
@@ -56,7 +56,7 @@ export function PauseAllTasks():Promise<main.Snapshot>;
 
 export function PauseTask(arg1:number):Promise<main.Snapshot>;
 
-export function RemovePlatformCookie(arg1:string):Promise<Record<string, any>>;
+export function RemovePlatformCookie(arg1:string):Promise<main.CookieRemoveResult>;
 
 export function RemoveTask(arg1:number):Promise<main.Snapshot>;
 
@@ -64,9 +64,9 @@ export function ReportFrontendError(arg1:string):Promise<void>;
 
 export function SaveSettings(arg1:main.Settings):Promise<main.Snapshot>;
 
-export function SelectCookieFile():Promise<Record<string, any>>;
+export function SelectCookieFile():Promise<main.CookiePickResult>;
 
-export function SelectFFmpegFile():Promise<Record<string, any>>;
+export function SelectFFmpegFile():Promise<main.FilePickResult>;
 
 export function SelectFolder():Promise<string>;
 
@@ -76,4 +76,4 @@ export function StartAllTasks():Promise<main.Snapshot>;
 
 export function StartTask(arg1:number):Promise<main.Snapshot>;
 
-export function TestProxy(arg1:string):Promise<Record<string, any>>;
+export function TestProxy(arg1:string):Promise<main.ProxyTestResult>;

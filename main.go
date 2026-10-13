@@ -242,7 +242,7 @@ func (a *App) Snapshot() Snapshot {
 	return a.snapshotLocked()
 }
 
-func (a *App) GetSystemStatus() map[string]any {
+func (a *App) GetSystemStatus() SystemStatus {
 	engine, err := findYTDLP()
 	ffmpeg, ffmpegErr := a.findFFmpeg()
 	ffmpegLabel := ""
@@ -258,14 +258,13 @@ func (a *App) GetSystemStatus() map[string]any {
 	proxyOK, proxyMessage := false, "代理检测已关闭"
 	if proxyEnabled && autoDetect {
 		result := a.TestProxy(proxyURL)
-		proxyOK, _ = result["ok"].(bool)
-		proxyMessage, _ = result["message"].(string)
+		proxyOK, proxyMessage = result.OK, result.Message
 	}
-	return map[string]any{
-		"engineReady": err == nil, "enginePath": engine, "engineError": errorText(err),
-		"ffmpegReady": ffmpegErr == nil, "ffmpegPath": ffmpeg, "ffmpegError": errorText(ffmpegErr), "ffmpegVersion": ffmpegLabel,
-		"proxyChecked": proxyEnabled && autoDetect, "proxyReady": proxyOK, "proxyMessage": proxyMessage,
-		"dataDir": dataDir,
+	return SystemStatus{
+		EngineReady: err == nil, EnginePath: engine, EngineError: errorText(err),
+		FFmpegReady: ffmpegErr == nil, FFmpegPath: ffmpeg, FFmpegError: errorText(ffmpegErr), FFmpegVersion: ffmpegLabel,
+		ProxyChecked: proxyEnabled && autoDetect, ProxyReady: proxyOK, ProxyMessage: proxyMessage,
+		DataDir: dataDir,
 	}
 }
 
@@ -361,10 +360,10 @@ func ffmpegVersion(path string) (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
-func (a *App) TestProxy(raw string) map[string]any {
+func (a *App) TestProxy(raw string) ProxyTestResult {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Hostname() == "" {
-		return map[string]any{"ok": false, "message": "代理地址无效"}
+		return ProxyTestResult{OK: false, Message: "代理地址无效"}
 	}
 	port := u.Port()
 	if port == "" {
@@ -377,10 +376,10 @@ func (a *App) TestProxy(raw string) map[string]any {
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(u.Hostname(), port), 2*time.Second)
 	if err != nil {
-		return map[string]any{"ok": false, "message": "连接失败：" + err.Error()}
+		return ProxyTestResult{OK: false, Message: "连接失败：" + err.Error()}
 	}
 	_ = conn.Close()
-	return map[string]any{"ok": true, "message": fmt.Sprintf("代理端口可连接 · %d ms", time.Since(start).Milliseconds())}
+	return ProxyTestResult{OK: true, Message: fmt.Sprintf("代理端口可连接 · %d ms", time.Since(start).Milliseconds())}
 }
 
 func findYTDLP() (string, error) {
@@ -1736,16 +1735,16 @@ func (a *App) resolveHEVCVideoEncoder(ffmpegPath string) (hevcEncoderSpec, bool)
 }
 
 // GetHEVCEncoderStatus 返回当前设备可用的 H.265 显卡编码器(探测结果缓存,供设置页展示)。
-func (a *App) GetHEVCEncoderStatus() map[string]any {
+func (a *App) GetHEVCEncoderStatus() EncoderStatus {
 	ffmpegPath, err := a.findFFmpeg()
 	if err != nil {
-		return map[string]any{"ok": false, "gpu": false, "message": "未检测到 FFmpeg，无法使用 H.265 转码"}
+		return EncoderStatus{OK: false, GPU: false, Message: "未检测到 FFmpeg，无法使用 H.265 转码"}
 	}
 	spec, ok := a.resolveHEVCVideoEncoder(ffmpegPath)
 	if ok {
-		return map[string]any{"ok": true, "gpu": true, "encoder": spec.id, "label": spec.label}
+		return EncoderStatus{OK: true, GPU: true, Encoder: spec.id, Label: spec.label}
 	}
-	return map[string]any{"ok": true, "gpu": false, "encoder": "cpu", "label": "CPU(libx265)", "message": "未检测到可用的显卡编码器，将使用 CPU 转码"}
+	return EncoderStatus{OK: true, GPU: false, Encoder: "cpu", Label: "CPU(libx265)", Message: "未检测到可用的显卡编码器，将使用 CPU 转码"}
 }
 
 // decodeOutput 把 yt-dlp 的输出解码为 UTF-8:Windows 下 Python 的错误信息常为 GBK 编码。
@@ -2242,7 +2241,7 @@ func (a *App) SelectFolder() string {
 }
 
 // SelectCookieFile 让用户选择 cookies.txt,并做格式校验与自动修复。
-func (a *App) SelectCookieFile() map[string]any {
+func (a *App) SelectCookieFile() CookiePickResult {
 	current := a.GetSettings().CookieFile
 	defaultDir := ""
 	if current != "" {
@@ -2257,14 +2256,14 @@ func (a *App) SelectCookieFile() map[string]any {
 		},
 	})
 	if err != nil || chosen == "" {
-		return map[string]any{"canceled": true}
+		return CookiePickResult{Canceled: true}
 	}
 	chosen = filepath.Clean(chosen)
 	note, verifyErr := repairCookieFile(chosen)
 	if verifyErr != nil {
-		return map[string]any{"ok": false, "message": verifyErr.Error()}
+		return CookiePickResult{OK: false, Message: verifyErr.Error()}
 	}
-	return map[string]any{"ok": true, "path": chosen, "note": note}
+	return CookiePickResult{OK: true, Path: chosen, Note: note}
 }
 
 // repairCookieFile 校验 cookies 文件,并自动修复两个高频问题:
@@ -2331,7 +2330,7 @@ func looksLikeCookieLines(text string) bool {
 }
 
 // SelectFFmpegFile 让用户指定已下载的 ffmpeg.exe，校验后保存。
-func (a *App) SelectFFmpegFile() map[string]any {
+func (a *App) SelectFFmpegFile() FilePickResult {
 	chosen, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "选择 ffmpeg.exe",
 		Filters: []runtime.FileFilter{
@@ -2340,18 +2339,18 @@ func (a *App) SelectFFmpegFile() map[string]any {
 		},
 	})
 	if err != nil || chosen == "" {
-		return map[string]any{"ok": false, "canceled": true}
+		return FilePickResult{OK: false, Canceled: true}
 	}
 	chosen = filepath.Clean(chosen)
 	version, verr := ffmpegVersion(chosen)
 	if verr != nil {
-		return map[string]any{"ok": false, "message": "所选文件无法作为 FFmpeg 运行：" + verr.Error()}
+		return FilePickResult{OK: false, Message: "所选文件无法作为 FFmpeg 运行：" + verr.Error()}
 	}
 	a.mu.Lock()
 	a.store.Settings.FFmpegPath = chosen
 	_ = a.saveLocked()
 	a.mu.Unlock()
-	return map[string]any{"ok": true, "path": chosen, "version": version}
+	return FilePickResult{OK: true, Path: chosen, Version: version}
 }
 
 const (
@@ -2381,11 +2380,11 @@ func (a *App) emitFFmpegProgress(phase string, received, total int64, message st
 
 // InstallFFmpeg 自动下载并安装 FFmpeg(优先走用户配置的代理)。
 // 解压目标优先程序安装目录,不可写时回退用户数据目录。
-func (a *App) InstallFFmpeg() map[string]any {
+func (a *App) InstallFFmpeg() FFmpegInstallResult {
 	a.mu.Lock()
 	if a.ffmpegInstalling {
 		a.mu.Unlock()
-		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中，请稍候"}
+		return FFmpegInstallResult{OK: false, Message: "FFmpeg 正在安装中，请稍候"}
 	}
 	a.ffmpegInstalling = true
 	useProxy, proxyURL := a.store.Settings.UseProxy, a.store.Settings.ProxyURL
@@ -2398,10 +2397,10 @@ func (a *App) InstallFFmpeg() map[string]any {
 
 	binDir, err := a.ffmpegTargetBinDir()
 	if err != nil {
-		return map[string]any{"ok": false, "message": err.Error()}
+		return FFmpegInstallResult{OK: false, Message: err.Error()}
 	}
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return map[string]any{"ok": false, "message": "创建安装目录失败：" + err.Error()}
+		return FFmpegInstallResult{OK: false, Message: "创建安装目录失败：" + err.Error()}
 	}
 
 	tmpZip := filepath.Join(os.TempDir(), "downtube-ffmpeg.zip")
@@ -2421,18 +2420,18 @@ func (a *App) InstallFFmpeg() map[string]any {
 		}
 	}
 	if downloadErr != nil {
-		return map[string]any{"ok": false, "message": "下载失败：" + downloadErr.Error() + "。如果网络受限，请在设置中开启代理后重试"}
+		return FFmpegInstallResult{OK: false, Message: "下载失败：" + downloadErr.Error() + "。如果网络受限，请在设置中开启代理后重试"}
 	}
 
 	a.emitFFmpegProgress("extract", 0, 0, "正在解压安装(约需十余秒)…")
 	if err := extractFFmpegArchive(tmpZip, binDir, nil); err != nil {
-		return map[string]any{"ok": false, "message": "解压失败：" + err.Error()}
+		return FFmpegInstallResult{OK: false, Message: "解压失败：" + err.Error()}
 	}
 
 	ffmpegPath := filepath.Join(binDir, "ffmpeg.exe")
 	version, verr := ffmpegVersion(ffmpegPath)
 	if verr != nil {
-		return map[string]any{"ok": false, "message": "安装校验未通过：" + verr.Error()}
+		return FFmpegInstallResult{OK: false, Message: "安装校验未通过：" + verr.Error()}
 	}
 
 	a.mu.Lock()
@@ -2441,16 +2440,16 @@ func (a *App) InstallFFmpeg() map[string]any {
 	a.mu.Unlock()
 
 	a.emitFFmpegProgress("done", 0, 0, "安装完成")
-	return map[string]any{"ok": true, "path": ffmpegPath, "version": version}
+	return FFmpegInstallResult{OK: true, Path: ffmpegPath, Version: version}
 }
 
 // ImportFFmpegArchive 让用户选择已下载的 FFmpeg 安装包(.7z / .zip),
 // 自动解压到程序目录并配置 bin 下的可执行文件。
-func (a *App) ImportFFmpegArchive() map[string]any {
+func (a *App) ImportFFmpegArchive() FFmpegInstallResult {
 	a.mu.Lock()
 	if a.ffmpegInstalling {
 		a.mu.Unlock()
-		return map[string]any{"ok": false, "message": "FFmpeg 正在安装中，请稍候"}
+		return FFmpegInstallResult{OK: false, Message: "FFmpeg 正在安装中，请稍候"}
 	}
 	a.ffmpegInstalling = true
 	a.mu.Unlock()
@@ -2468,18 +2467,18 @@ func (a *App) ImportFFmpegArchive() map[string]any {
 		},
 	})
 	if err != nil || chosen == "" {
-		return map[string]any{"ok": false, "canceled": true}
+		return FFmpegInstallResult{OK: false, Canceled: true}
 	}
 	chosen = filepath.Clean(chosen)
 	switch strings.ToLower(filepath.Ext(chosen)) {
 	case ".7z", ".zip":
 	default:
-		return map[string]any{"ok": false, "message": "仅支持 .7z 或 .zip 格式的安装包"}
+		return FFmpegInstallResult{OK: false, Message: "仅支持 .7z 或 .zip 格式的安装包"}
 	}
 
 	binDir, err := a.ffmpegTargetBinDir()
 	if err != nil {
-		return map[string]any{"ok": false, "message": err.Error()}
+		return FFmpegInstallResult{OK: false, Message: err.Error()}
 	}
 
 	a.emitFFmpegProgress("extract", 0, 0, "正在解压安装包…")
@@ -2487,13 +2486,13 @@ func (a *App) ImportFFmpegArchive() map[string]any {
 		a.emitFFmpegProgress("extract", 0, 0, fmt.Sprintf("正在解压(已写出 %.0f MB)…", float64(received)/1048576))
 	}
 	if err := extractFFmpegArchive(chosen, binDir, progress); err != nil {
-		return map[string]any{"ok": false, "message": "解压失败：" + err.Error()}
+		return FFmpegInstallResult{OK: false, Message: "解压失败：" + err.Error()}
 	}
 
 	ffmpegPath := filepath.Join(binDir, "ffmpeg.exe")
 	version, verr := ffmpegVersion(ffmpegPath)
 	if verr != nil {
-		return map[string]any{"ok": false, "message": "安装校验未通过：" + verr.Error()}
+		return FFmpegInstallResult{OK: false, Message: "安装校验未通过：" + verr.Error()}
 	}
 
 	a.mu.Lock()
@@ -2502,7 +2501,7 @@ func (a *App) ImportFFmpegArchive() map[string]any {
 	a.mu.Unlock()
 
 	a.emitFFmpegProgress("done", 0, 0, "安装完成")
-	return map[string]any{"ok": true, "path": ffmpegPath, "version": version}
+	return FFmpegInstallResult{OK: true, Path: ffmpegPath, Version: version}
 }
 
 // downloadFile 下载 src 到 dest，期间通过事件广播进度；proxyURL 为空时直连。

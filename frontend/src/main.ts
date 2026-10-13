@@ -1488,7 +1488,7 @@ async function browseCookieFile() {
     const result = await api.SelectCookieFile()
     if (!result || result.canceled) return
     if (!result.ok) { toast(result.message || 'Cookies 文件不可用'); return }
-    state.cookieFile = result.path
+    state.cookieFile = result.path!
     state.settingsDirty = true
     render()
     toast(result.note ? `已选择 Cookies 文件：${result.note}` : '已选择 Cookies 文件')

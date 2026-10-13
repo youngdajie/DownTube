@@ -992,36 +992,36 @@ func TestUpdateCheckLive(t *testing.T) {
 	// 低版本:应检测到更新,并给出可下载地址。
 	low := app.CheckUpdate("0.0.1")
 	t.Logf("0.0.1 → ok=%v hasUpdate=%v latest=%q source=%q url=%q",
-		low["ok"], low["hasUpdate"], low["latest"], low["source"], low["url"])
-	if low["ok"] != true {
-		t.Fatalf("检查更新失败: %v", low["error"])
+		low.OK, low.HasUpdate, low.Latest, low.Source, low.URL)
+	if low.OK != true {
+		t.Fatalf("检查更新失败: %v", low.Error)
 	}
-	if low["hasUpdate"] != true {
+	if low.HasUpdate != true {
 		t.Fatalf("低版本未检出更新: %v", low)
 	}
-	latest, _ := low["latest"].(string)
+	latest := low.Latest
 	if latest == "" {
 		t.Fatal("latest 为空")
 	}
-	url, _ := low["url"].(string)
+	url := low.URL
 	if !allowedUpdateHost(url) {
 		t.Fatalf("下载地址不在白名单: %q", url)
 	}
 
 	// 等于最新版:应报告已是最新。
 	same := app.CheckUpdate(latest)
-	t.Logf("当前最新版 %s → ok=%v hasUpdate=%v", latest, same["ok"], same["hasUpdate"])
-	if same["ok"] != true {
-		t.Fatalf("最新版检查失败: %v", same["error"])
+	t.Logf("当前最新版 %s → ok=%v hasUpdate=%v", latest, same.OK, same.HasUpdate)
+	if same.OK != true {
+		t.Fatalf("最新版检查失败: %v", same.Error)
 	}
-	if same["hasUpdate"] != false {
+	if same.HasUpdate != false {
 		t.Fatalf("最新版仍报告有更新: %v", same)
 	}
 
 	// 更高版本:不应报告更新。
 	high := app.CheckUpdate("99.0.0")
-	if high["ok"] != true || high["hasUpdate"] != false {
-		t.Fatalf("高版本判断异常: %v", high)
+	if high.OK != true || high.HasUpdate != false {
+		t.Fatalf("高版本判断异常: %+v", high)
 	}
 
 	// 已发布过的版本:必须都能检出当前版本。
@@ -1029,12 +1029,12 @@ func TestUpdateCheckLive(t *testing.T) {
 	// 列表里保留最近几个版本即可;某天某个版本被淘汰(不再小于最新版)时删掉它。
 	for _, prevVersion := range []string{"1.2.4", "1.2.5", "1.2.6", "1.2.7"} {
 		prev := app.CheckUpdate(prevVersion)
-		t.Logf("%s → ok=%v hasUpdate=%v latest=%q source=%q", prevVersion, prev["ok"], prev["hasUpdate"], prev["latest"], prev["source"])
-		if prev["ok"] != true {
-			t.Fatalf("%s 检查失败: %v", prevVersion, prev["error"])
+		t.Logf("%s → ok=%v hasUpdate=%v latest=%q source=%q", prevVersion, prev.OK, prev.HasUpdate, prev.Latest, prev.Source)
+		if prev.OK != true {
+			t.Fatalf("%s 检查失败: %v", prevVersion, prev.Error)
 		}
-		if prev["hasUpdate"] != true {
-			t.Fatalf("%s 未检出更新,老用户将收不到提示: %v", prevVersion, prev)
+		if prev.HasUpdate != true {
+			t.Fatalf("%s 未检出更新,老用户将收不到提示: %+v", prevVersion, prev)
 		}
 	}
 }
@@ -1063,8 +1063,8 @@ func TestUpdateDownloadLive(t *testing.T) {
 	// 优先用 check 结果(新命名);探测失败时回退到 CNB 当前 Release 的已知地址,
 	// 保证下载机制在「命名切换过渡期」也能被真实验证。
 	url := ""
-	if info := app.CheckUpdate("0.0.1"); info["ok"] == true && info["hasUpdate"] == true {
-		url, _ = info["url"].(string)
+	if info := app.CheckUpdate("0.0.1"); info.OK == true && info.HasUpdate == true {
+		url = info.URL
 	}
 	version := "1.2.3"
 	if url == "" || !app.remoteFileExists(url) {
@@ -1075,11 +1075,11 @@ func TestUpdateDownloadLive(t *testing.T) {
 	}
 
 	result := app.DownloadUpdate(url, version)
-	t.Logf("下载 %s → ok=%v size=%v error=%v", url, result["ok"], result["size"], result["error"])
-	if result["ok"] != true {
-		t.Fatalf("下载安装包失败: %v", result["error"])
+	t.Logf("下载 %s → ok=%v size=%v error=%v", url, result.OK, result.Size, result.Error)
+	if result.OK != true {
+		t.Fatalf("下载安装包失败: %v", result.Error)
 	}
-	path, _ := result["path"].(string)
+	path := result.Path
 	defer func() {
 		_ = os.Remove(path)
 		_ = os.RemoveAll(filepath.Join(os.TempDir(), updateTempDir))

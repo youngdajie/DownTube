@@ -246,37 +246,37 @@ func readCookieText(filePath string) (string, error) {
 }
 
 // CookieStatus 返回分平台 Cookies 的导入状态,供设置页展示。
-func (a *App) CookieStatus() map[string]any {
+func (a *App) CookieStatus() CookieStatusResult {
 	dir, dirErr := cookieDataDir()
 	if dirErr != nil {
 		dir = ""
 	}
-	platforms := []map[string]any{}
+	platforms := []CookiePlatformStatus{}
 	for _, p := range cookiePlatforms {
-		item := map[string]any{
-			"id": p.ID, "name": p.Name, "file": p.File,
-			"imported": false, "count": 0, "updatedAt": "",
+		item := CookiePlatformStatus{
+			ID: p.ID, Name: p.Name, File: p.File,
+			Imported: false, Count: 0, UpdatedAt: "",
 		}
 		if dir != "" {
 			path := filepath.Join(dir, p.File)
 			if info, err := os.Stat(path); err == nil && !info.IsDir() {
-				item["imported"] = true
-				item["count"] = countCookieLines(path)
-				item["updatedAt"] = info.ModTime().Format("2006-01-02 15:04")
+				item.Imported = true
+				item.Count = countCookieLines(path)
+				item.UpdatedAt = info.ModTime().Format("2006-01-02 15:04")
 			}
 		}
 		platforms = append(platforms, item)
 	}
-	status := map[string]any{"dir": dir, "platforms": platforms}
+	status := CookieStatusResult{Dir: dir, Platforms: platforms}
 	if dirErr != nil {
-		status["error"] = dirErr.Error()
+		status.Error = dirErr.Error()
 	}
 	return status
 }
 
 // ImportPlatformCookie 选择一个 cookies.txt,识别其中的站点并分别保存到数据目录。
 // 同时含两个站点的文件会一次写入两个文件,不属于这两个站点的行会被丢弃。
-func (a *App) ImportPlatformCookie() map[string]any {
+func (a *App) ImportPlatformCookie() CookieImportResult {
 	chosen, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "选择 cookies.txt 文件",
 		Filters: []runtime.FileFilter{
@@ -285,22 +285,22 @@ func (a *App) ImportPlatformCookie() map[string]any {
 		},
 	})
 	if err != nil || chosen == "" {
-		return map[string]any{"canceled": true}
+		return CookieImportResult{Canceled: true}
 	}
 	chosen = filepath.Clean(chosen)
 	text, err := readCookieText(chosen)
 	if err != nil {
-		return map[string]any{"ok": false, "message": err.Error()}
+		return CookieImportResult{OK: false, Message: err.Error()}
 	}
 	matched := cookiePlatformsIn(text)
 	if len(matched) == 0 {
-		return map[string]any{"ok": false, "message": "没有识别到 YouTube 或哔哩哔哩的 Cookies，请确认导出时选的是对应站点"}
+		return CookieImportResult{OK: false, Message: "没有识别到 YouTube 或哔哩哔哩的 Cookies，请确认导出时选的是对应站点"}
 	}
 	dir, err := cookieDataDir()
 	if err != nil {
-		return map[string]any{"ok": false, "message": err.Error()}
+		return CookieImportResult{OK: false, Message: err.Error()}
 	}
-	saved := []map[string]any{}
+	saved := []CookieImportEntry{}
 	dropped := 0
 	for _, p := range matched {
 		kept, drop := splitCookieLines(text, p)
@@ -309,30 +309,30 @@ func (a *App) ImportPlatformCookie() map[string]any {
 			continue
 		}
 		if err := os.WriteFile(filepath.Join(dir, p.File), []byte(cookieFileText(kept)), 0o600); err != nil {
-			return map[string]any{"ok": false, "message": fmt.Sprintf("保存 %s 的 Cookies 失败：%v", p.Name, err)}
+			return CookieImportResult{OK: false, Message: fmt.Sprintf("保存 %s 的 Cookies 失败：%v", p.Name, err)}
 		}
-		saved = append(saved, map[string]any{"id": p.ID, "name": p.Name, "count": len(kept)})
+		saved = append(saved, CookieImportEntry{ID: p.ID, Name: p.Name, Count: len(kept)})
 	}
 	if len(saved) == 0 {
-		return map[string]any{"ok": false, "message": "文件里属于目标站点的 Cookies 是空的，请重新导出"}
+		return CookieImportResult{OK: false, Message: "文件里属于目标站点的 Cookies 是空的，请重新导出"}
 	}
-	return map[string]any{"ok": true, "saved": saved, "dropped": dropped, "dir": dir}
+	return CookieImportResult{OK: true, Saved: saved, Dropped: dropped, Dir: dir}
 }
 
 // RemovePlatformCookie 删除某个站点已保存的 Cookies。
-func (a *App) RemovePlatformCookie(platformID string) map[string]any {
+func (a *App) RemovePlatformCookie(platformID string) CookieRemoveResult {
 	p, ok := cookiePlatformByID(platformID)
 	if !ok {
-		return map[string]any{"ok": false, "message": "未知的站点"}
+		return CookieRemoveResult{OK: false, Message: "未知的站点"}
 	}
 	path, err := platformCookiePath(p)
 	if err != nil {
-		return map[string]any{"ok": false, "message": err.Error()}
+		return CookieRemoveResult{OK: false, Message: err.Error()}
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return map[string]any{"ok": false, "message": fmt.Sprintf("删除失败：%v", err)}
+		return CookieRemoveResult{OK: false, Message: fmt.Sprintf("删除失败：%v", err)}
 	}
-	return map[string]any{"ok": true, "id": p.ID, "name": p.Name}
+	return CookieRemoveResult{OK: true, ID: p.ID, Name: p.Name}
 }
 
 // OpenCookieFolder 打开存放分平台 Cookies 的目录。
