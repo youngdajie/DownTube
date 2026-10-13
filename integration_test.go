@@ -1027,7 +1027,7 @@ func TestUpdateCheckLive(t *testing.T) {
 	// 已发布过的版本:必须都能检出当前版本。
 	// 这条对应真实场景 —— 老用户打开软件时应看到更新提示。
 	// 列表里保留最近几个版本即可;某天某个版本被淘汰(不再小于最新版)时删掉它。
-	for _, prevVersion := range []string{"1.2.4", "1.2.5", "1.2.6"} {
+	for _, prevVersion := range []string{"1.2.4", "1.2.5", "1.2.6", "1.2.7"} {
 		prev := app.CheckUpdate(prevVersion)
 		t.Logf("%s → ok=%v hasUpdate=%v latest=%q source=%q", prevVersion, prev["ok"], prev["hasUpdate"], prev["latest"], prev["source"])
 		if prev["ok"] != true {
