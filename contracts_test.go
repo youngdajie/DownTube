@@ -166,8 +166,8 @@ func TestContractKeysUnchanged(t *testing.T) {
 		},
 		{
 			name: "CookieStatus(取目录失败,多 error 键)",
-			old: map[string]any{"dir": "", "platforms": []map[string]any{}, "error": "e"},
-			new: CookieStatusResult{Platforms: []CookiePlatformStatus{}, Error: "e"},
+			old:  map[string]any{"dir": "", "platforms": []map[string]any{}, "error": "e"},
+			new:  CookieStatusResult{Platforms: []CookiePlatformStatus{}, Error: "e"},
 		},
 		{
 			name: "ImportPlatformCookie(成功)",

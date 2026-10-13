@@ -15,6 +15,7 @@ declare global {
       EventsOn?: (event: string, callback: (data: any) => void) => void
       EventsOff?: (event: string, ...args: any[]) => void
       ClipboardGetText?: () => Promise<string>
+      ClipboardSetText?: (text: string) => Promise<boolean>
       [key: string]: any
     }
   }

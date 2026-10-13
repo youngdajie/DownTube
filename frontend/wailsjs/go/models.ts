@@ -380,6 +380,22 @@ export namespace main {
 	    }
 	}
 	
+	export class ToolboxStartResult {
+	    ok: boolean;
+	    message?: string;
+	    canceled?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ToolboxStartResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ok = source["ok"];
+	        this.message = source["message"];
+	        this.canceled = source["canceled"];
+	    }
+	}
 	export class UpdateDownloadResult {
 	    ok: boolean;
 	    error?: string;

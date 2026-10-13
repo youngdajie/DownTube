@@ -45,6 +45,7 @@ const ICON_PATHS: Record<string, string> = {
   save: '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
   sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4"/>',
   key: '<path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3"/>',
+  toolbox: '<rect x="3" y="8" width="18" height="12" rx="2"/><path d="M7 8V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/>',
   broadcast: '<path d="M4.9 19.1a10 10 0 0 1 0-14.2"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4"/><path d="M19.1 4.9a10 10 0 0 1 0 14.2"/><circle cx="12" cy="12" r="1.5"/>',
 }
 const icon = (name: string, size = 17) =>
@@ -103,7 +104,7 @@ const STATUS_CLASS: Record<string, string> = { 等待中: 'waiting', 准备中: 
  */
 interface AppState {
   // —— 视图状态:取值封闭,收成联合类型 ——
-  page: 'downloads' | 'settings' | 'about'
+  page: 'downloads' | 'settings' | 'toolbox' | 'about'
   theme: 'light' | 'dark'
   queueStep: 'add' | 'list'
   linkMode: 'batch' | 'single'
@@ -178,6 +179,19 @@ interface AppState {
   updateProgress: number
   updateMessage: string
   updateError: string
+
+  // —— 百宝箱:FFmpeg 工具 ——
+  toolboxVideo: string
+  toolboxVideoInfo: string
+  toolboxAudio: string
+  toolboxAudioInfo: string
+  /** 是否用显卡加速重编码;不勾选则走流复制(无损、瞬间完成) */
+  toolboxReencode: boolean
+  toolboxBusy: boolean
+  toolboxPhase: string
+  toolboxProgress: number
+  toolboxMessage: string
+  toolboxResult: string
 }
 
 const state: AppState = {
@@ -241,6 +255,18 @@ const state: AppState = {
   updateProgress: 0,
   updateMessage: '',
   updateError: '',
+
+  /* 百宝箱:FFmpeg 工具 */
+  toolboxVideo: '',
+  toolboxVideoInfo: '',
+  toolboxAudio: '',
+  toolboxAudioInfo: '',
+  toolboxReencode: false,
+  toolboxBusy: false,
+  toolboxPhase: '',
+  toolboxProgress: 0,
+  toolboxMessage: '',
+  toolboxResult: '',
 }
 
 let scrollReset = false
@@ -362,12 +388,13 @@ function render() {
           <nav class="nav">
             <button class="nav-item ${state.page === 'downloads' ? 'active' : ''}" data-page="downloads">${icon('download')}<span>下载队列</span><em>${state.tasks.length || ''}</em></button>
             <button class="nav-item ${state.page === 'settings' ? 'active' : ''}" data-page="settings">${icon('settings')}<span>设置</span></button>
+            <button class="nav-item ${state.page === 'toolbox' ? 'active' : ''}" data-page="toolbox">${icon('toolbox')}<span>百宝箱</span></button>
             <button class="nav-item ${state.page === 'about' ? 'active' : ''}" data-page="about">${icon('info')}<span>关于</span>${state.updateHas ? '<i class="nav-badge"></i>' : ''}</button>
           </nav>
         </aside>
         <main class="main">
           <div class="content ${state.enterAnim ? 'page-enter' : ''}">
-            <div class="page">${state.page === 'downloads' ? renderDownloads() : state.page === 'settings' ? renderSettings() : renderAbout()}</div>
+            <div class="page">${state.page === 'downloads' ? renderDownloads() : state.page === 'settings' ? renderSettings() : state.page === 'toolbox' ? renderToolbox() : renderAbout()}</div>
           </div>
           ${renderStatusbar()}
         </main>
@@ -460,9 +487,10 @@ function renderAddView() {
     </div>
     <div class="sites-note">
       <div class="sites-head"><b>支持的站点</b><span>下载内核为 yt-dlp，只要它支持，这里多半也能下</span></div>
-      <div class="sites-group"><span class="sites-label">视频</span><p>YouTube、哔哩哔哩、抖音、西瓜视频、优酷、爱奇艺、腾讯视频、芒果TV、微博、TikTok、Twitter/X、Instagram、Facebook、Vimeo、Twitch、Reddit、Dailymotion</p></div>
-      <div class="sites-group"><span class="sites-label">音乐</span><p>SoundCloud、Bandcamp、网易云音乐、QQ音乐</p></div>
-      <p class="sites-caveat">yt-dlp 支持 1700 多个站点，上面只是常见示例。站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入。另外，<b>播放列表、频道、合集与 UP 主空间的链接会把它下面的每个视频都逐个下载</b>，而队列里只显示一条任务，可能需要非常久。</p>
+      <div class="sites-group"><span class="sites-label">最佳</span><p class="sites-best"><b>YouTube</b><b>哔哩哔哩</b></p></div>
+      <div class="sites-group"><span class="sites-label">其他</span><p class="sites-weak">抖音、西瓜视频、优酷、爱奇艺、腾讯视频、芒果TV、微博、TikTok、Twitter/X、Instagram、Facebook、Vimeo、Twitch、Reddit、Dailymotion</p></div>
+      <div class="sites-group"><span class="sites-label">音乐</span><p class="sites-weak">SoundCloud、Bandcamp、网易云音乐、QQ音乐</p></div>
+      <p class="sites-caveat">YouTube 与哔哩哔哩适配最充分，画质选项、字幕、播放列表和 Cookies 都按这两个站点调过；抖音视频建议用左侧<b>「百宝箱」</b>里的 Edge 插件下载，效果更好。站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入。另外，<b>播放列表、频道、合集与 UP 主空间的链接会把它下面的每个视频都逐个下载</b>，而队列里只显示一条任务，可能需要非常久。</p>
     </div>
   </div>`
 }
@@ -786,6 +814,99 @@ function renderUpdateBlock() {
     return `<p class="update-ok">已是最新版本</p>`
   }
   return ''
+}
+
+// ============================================================
+// 百宝箱:推荐工具 + FFmpeg 工具箱
+// ============================================================
+
+const TAMPERMONKEY_REPO = 'https://github.com/WhiteSevs/TamperMonkeyScript'
+
+/** 抖音网页端 Edge 插件推荐 */
+function renderToolboxRecommend() {
+  return `<div class="tb-card">
+    <div class="tb-card-head">
+      <span class="tb-card-icon">${icon('shield', 18)}</span>
+      <div><h2>推荐</h2><span class="card-sub">抖音网页端的更好用法</span></div>
+    </div>
+    <div class="tb-recommend">
+      <div class="tb-recommend-body">
+        <h3>Tampermonkey 脚本 · Edge 浏览器插件</h3>
+        <p>在 Edge 里安装油猴插件后导入该脚本，可以<b>直接下载抖音网页端的视频</b>，并去掉大量干扰元素，浏览体验比裸网页版好很多。</p>
+        <p class="tb-recommend-tip">${icon('checkcircle', 14)}下载抖音视频<b>强烈推荐用这个插件</b>，比在本工具里粘贴链接更稳、画质也更完整</p>
+      </div>
+      <div class="tb-recommend-actions">
+        <button class="btn btn-primary btn-sm" id="tbOpenRepo">${icon('external', 14)}打开仓库</button>
+        <button class="btn btn-ghost btn-sm" id="tbCopyRepo">${icon('clipboard', 14)}复制地址</button>
+      </div>
+      <div class="tb-repo">${icon('github', 14)}<span>${TAMPERMONKEY_REPO}</span></div>
+    </div>
+  </div>`
+}
+
+/** FFmpeg 工具箱:合并 / 分离 */
+function renderToolboxFFmpeg() {
+  const canStart = !!state.toolboxVideo && !state.toolboxBusy
+  return `<div class="tb-card">
+    <div class="tb-card-head">
+      <span class="tb-card-icon">${icon('sliders', 18)}</span>
+      <div><h2>FFmpeg 工具</h2><span class="card-sub">视频音频合并与分离,支持显卡硬件加速</span></div>
+    </div>
+
+    <div class="tb-panel">
+      <div class="tb-panel-title">${icon('layers', 15)}视频音频合并</div>
+      <p class="tb-panel-desc">把选中的音频合并进视频,替换掉原视频的音轨。适合「下载到的是无声视频,需要另找的音轨」这种情况。</p>
+      <div class="tb-files">
+        <div class="tb-file">
+          <span class="tb-file-tag">视频</span>
+          <span class="tb-file-name" id="tbVideoName">${state.toolboxVideo ? safe(shortURL(state.toolboxVideo)) : '未选择'}</span>
+          <button class="btn btn-ghost btn-sm" id="tbPickVideo" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
+        </div>
+        <div class="tb-file">
+          <span class="tb-file-tag">音频</span>
+          <span class="tb-file-name" id="tbAudioName">${state.toolboxAudio ? safe(shortURL(state.toolboxAudio)) : '未选择'}</span>
+          <button class="btn btn-ghost btn-sm" id="tbPickAudio" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
+        </div>
+      </div>
+      <div class="tb-actions">
+        <button class="btn btn-primary btn-sm" id="tbMerge" ${canStart && state.toolboxAudio ? '' : 'disabled'}>${icon('layers', 14)}开始合并</button>
+      </div>
+    </div>
+
+    <div class="tb-panel">
+      <div class="tb-panel-title">${icon('undo', 15)}视频分离</div>
+      <p class="tb-panel-desc">把一个视频拆成独立的视频流文件和音频流文件。适合「只想要其中一路」或者「想换封装/换音轨」的情况。</p>
+      <div class="tb-actions">
+        <button class="btn btn-primary btn-sm" id="tbSplit" ${canStart ? '' : 'disabled'}>${icon('undo', 14)}开始分离</button>
+      </div>
+    </div>
+
+    <label class="tb-switch">
+      <input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}>
+      <span>显卡加速重编码(输出 H.265,体积更小)</span>
+    </label>
+    <p class="tb-hint">${icon('info', 13)}不勾选时走<b>无损流复制</b>:不重新编码,瞬间完成且画质零损失。合并与分离本身不需要重编码,只有想让文件变更小才需要勾选。</p>
+
+    <div class="tb-progress-wrap" id="tbProgressWrap" ${state.toolboxBusy || state.toolboxResult ? '' : 'hidden'}>
+      <div class="tb-progress-head">
+        <span id="tbPhase">${safe(state.toolboxMessage || (state.toolboxBusy ? '处理中…' : '已完成'))}</span>
+        <span id="tbPercent">${Math.round(state.toolboxProgress)}%</span>
+      </div>
+      <div class="tb-progress"><div class="tb-progress-bar" id="tbProgressBar" style="width:${Math.round(state.toolboxProgress)}%"></div></div>
+      <div class="tb-progress-actions">
+        <button class="btn btn-ghost btn-sm" id="tbCancel" ${state.toolboxBusy ? '' : 'disabled'}>取消</button>
+      </div>
+    </div>
+    ${state.toolboxResult ? `<p class="tb-result ${state.toolboxResult.startsWith('失败') ? 'error' : ''}">${safe(state.toolboxResult)}</p>` : ''}
+    <p class="tb-outdir-note">${icon('folder', 13)}输出文件夹<b>每次都会弹窗询问</b>,不会自动保存、也不会记住上次的位置</p>
+  </div>`
+}
+
+function renderToolbox() {
+  return `<div class="tb-wrap">
+    ${renderToolboxRecommend()}
+    ${renderToolboxFFmpeg()}
+  </div>`
 }
 
 function renderAbout() {
@@ -1144,6 +1265,25 @@ function bind() {
   $('#linkCnb')?.addEventListener('click', () => backend()?.OpenCNBRepo?.())
   $('#linkBilibili')?.addEventListener('click', () => backend()?.OpenBilibili?.())
   $('#linkHomepage')?.addEventListener('click', () => backend()?.OpenHomepage?.())
+
+  // 百宝箱:推荐
+  $('#tbOpenRepo')?.addEventListener('click', () => backend()?.OpenExternalURL?.(TAMPERMONKEY_REPO))
+  $('#tbCopyRepo')?.addEventListener('click', async () => {
+    try {
+      await window.runtime?.ClipboardSetText?.(TAMPERMONKEY_REPO)
+      toast('仓库地址已复制')
+    } catch { toast('复制失败,请手动选中复制') }
+  })
+
+  // 百宝箱:FFmpeg 工具
+  $('#tbPickVideo')?.addEventListener('click', pickToolboxVideo)
+  $('#tbPickAudio')?.addEventListener('click', pickToolboxAudio)
+  $('#tbMerge')?.addEventListener('click', () => startToolboxTask('merge'))
+  $('#tbSplit')?.addEventListener('click', () => startToolboxTask('split'))
+  $('#tbCancel')?.addEventListener('click', cancelToolboxTask)
+  $('#tbReencode')?.addEventListener('change', (e) => {
+    state.toolboxReencode = (e.target as HTMLInputElement).checked
+  })
 
   // 版本更新
   $('#checkUpdateBtn')?.addEventListener('click', () => checkUpdate(true))
@@ -1687,6 +1827,103 @@ function closeFFmpegModal() {
   render()
 }
 
+// ============================================================
+// 百宝箱:FFmpeg 工具的交互
+// 输出目录由后端每次弹窗询问,前端只负责选文件、看进度、拿结果。
+// ============================================================
+
+async function pickToolboxVideo() {
+  const api = backend()
+  if (!api?.PickToolboxVideo) { toast('桌面版中可使用文件选择器'); return }
+  try {
+    const res = await api.PickToolboxVideo()
+    if (!res || res.canceled) return
+    if (!res.ok) { toast(res.message || '无法读取该视频'); return }
+    state.toolboxVideo = res.path!
+    state.toolboxVideoInfo = res.version || ''
+    state.toolboxResult = ''
+    render()
+  } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
+}
+
+async function pickToolboxAudio() {
+  const api = backend()
+  if (!api?.PickToolboxAudio) { toast('桌面版中可使用文件选择器'); return }
+  try {
+    const res = await api.PickToolboxAudio()
+    if (!res || res.canceled) return
+    if (!res.ok) { toast(res.message || '无法读取该音频'); return }
+    state.toolboxAudio = res.path!
+    state.toolboxAudioInfo = res.version || ''
+    state.toolboxResult = ''
+    render()
+  } catch (error) { toast(`选择音频失败：${(error as Error).message}`) }
+}
+
+/** 启动合并或分离。文件校验、输出目录弹窗都在后端,前端只管发起。 */
+async function startToolboxTask(kind: 'merge' | 'split') {
+  const api = backend()
+  if (!api) return
+  if (kind === 'merge' && (!state.toolboxVideo || !state.toolboxAudio)) {
+    toast('请先选择视频文件与音频文件'); return
+  }
+  if (kind === 'split' && !state.toolboxVideo) {
+    toast('请先选择视频文件'); return
+  }
+  state.toolboxBusy = true
+  state.toolboxProgress = 0
+  state.toolboxResult = ''
+  state.toolboxMessage = kind === 'merge' ? '正在准备合并…' : '正在准备分离…'
+  render()
+  try {
+    const res = kind === 'merge'
+      ? await api.MergeVideoAudio!(state.toolboxVideo, state.toolboxAudio, state.toolboxReencode)
+      : await api.SplitVideoStream!(state.toolboxVideo, state.toolboxReencode)
+    if (!res || res.canceled) {
+      // 用户在输出目录弹窗点了取消
+      state.toolboxBusy = false
+      state.toolboxMessage = ''
+      state.toolboxResult = ''
+      render()
+      return
+    }
+    if (!res.ok) {
+      state.toolboxBusy = false
+      state.toolboxProgress = 0
+      state.toolboxMessage = ''
+      state.toolboxResult = `失败：${res.message || '无法启动'}`
+      render()
+      toast(res.message || '无法启动')
+    }
+    // ok 时保持 busy,等 toolbox:progress / toolbox:finished 事件推进
+  } catch (error) {
+    state.toolboxBusy = false
+    state.toolboxMessage = ''
+    state.toolboxResult = `失败：${(error as Error).message}`
+    render()
+  }
+}
+
+async function cancelToolboxTask() {
+  if (!state.toolboxBusy) return
+  await backend()?.CancelToolboxTask?.()
+}
+
+/** 进度事件:更新进度条,不整页重绘(避免打断文件选择等交互) */
+function patchToolboxProgress() {
+  const wrap = $('#tbProgressWrap')
+  if (!wrap) { render(); return }
+  wrap.hidden = state.toolboxBusy || !!state.toolboxResult
+  const phase = $('#tbPhase')
+  if (phase) phase.textContent = state.toolboxMessage || (state.toolboxBusy ? '处理中…' : '已完成')
+  const percent = $('#tbPercent')
+  if (percent) percent.textContent = `${Math.round(state.toolboxProgress)}%`
+  const bar = $('#tbProgressBar')
+  if (bar) bar.style.width = `${Math.round(state.toolboxProgress)}%`
+  const cancel = $('#tbCancel')
+  if (cancel) (cancel as HTMLButtonElement).disabled = !state.toolboxBusy
+}
+
 async function finishFFmpegResult(result: any) {
   if (result && result.canceled) {
     state.ffmpegBusy = false
@@ -1837,6 +2074,27 @@ if (window.runtime?.EventsOn) {
     if (pct) pct.textContent = state.updateProgress > 0 ? state.updateProgress + '%' : ''
     const label = $('#updateProgressLabel')
     if (label && state.updateMessage) label.textContent = state.updateMessage
+  })
+
+  // 百宝箱:FFmpeg 工具进度
+  window.runtime.EventsOn('toolbox:progress', (data) => {
+    if (!data) return
+    if (typeof data.percent === 'number') state.toolboxProgress = data.percent
+    if (data.message) state.toolboxMessage = data.message
+    if (state.page !== 'toolbox') return
+    patchToolboxProgress()
+  })
+
+  window.runtime.EventsOn('toolbox:finished', (data) => {
+    if (!data) return
+    state.toolboxBusy = false
+    state.toolboxProgress = data.ok ? 100 : state.toolboxProgress
+    state.toolboxMessage = data.ok ? '完成' : ''
+    state.toolboxResult = data.ok
+      ? `已完成,输出目录:${data.output || ''}`
+      : `${data.message || '处理失败'}`
+    if (state.page !== 'toolbox') return
+    render()
   })
 }
 

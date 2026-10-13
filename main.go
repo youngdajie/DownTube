@@ -110,6 +110,7 @@ type App struct {
 	hevcProbed        bool
 	hevcProbedFor     string
 	hevcGPU           *hevcEncoderSpec
+	toolbox           toolboxRunner
 }
 
 type titleJob struct {
@@ -1486,7 +1487,7 @@ func concatWithSourceAudio(ctx context.Context, ffmpegPath, partsDir, encDir str
 	return nil
 }
 
-// escapeConcatPath 处理 ffconcat 列表中的路径转义:单引号需用 '\'' 的方式闭合转义。
+// escapeConcatPath 处理 ffconcat 列表中的路径转义:单引号需用 '\” 的方式闭合转义。
 func escapeConcatPath(path string) string {
 	return strings.ReplaceAll(path, "'", `'\''`)
 }

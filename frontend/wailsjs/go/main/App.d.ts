@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AddLinks(arg1:string):Promise<main.Snapshot>;
 
+export function CancelToolboxTask():Promise<boolean>;
+
 export function CheckBrowserRunning(arg1:string):Promise<boolean>;
 
 export function CheckUpdate(arg1:string):Promise<main.UpdateResult>;
@@ -29,6 +31,8 @@ export function ImportPlatformCookie():Promise<main.CookieImportResult>;
 export function InstallFFmpeg():Promise<main.FFmpegInstallResult>;
 
 export function InstallUpdate(arg1:string):Promise<main.UpdateInstallResult>;
+
+export function MergeVideoAudio(arg1:string,arg2:string,arg3:boolean):Promise<main.ToolboxStartResult>;
 
 export function OpenBilibili():Promise<void>;
 
@@ -56,6 +60,10 @@ export function PauseAllTasks():Promise<main.Snapshot>;
 
 export function PauseTask(arg1:number):Promise<main.Snapshot>;
 
+export function PickToolboxAudio():Promise<main.FilePickResult>;
+
+export function PickToolboxVideo():Promise<main.FilePickResult>;
+
 export function RemovePlatformCookie(arg1:string):Promise<main.CookieRemoveResult>;
 
 export function RemoveTask(arg1:number):Promise<main.Snapshot>;
@@ -72,8 +80,12 @@ export function SelectFolder():Promise<string>;
 
 export function Snapshot():Promise<main.Snapshot>;
 
+export function SplitVideoStream(arg1:string,arg2:boolean):Promise<main.ToolboxStartResult>;
+
 export function StartAllTasks():Promise<main.Snapshot>;
 
 export function StartTask(arg1:number):Promise<main.Snapshot>;
 
 export function TestProxy(arg1:string):Promise<main.ProxyTestResult>;
+
+export function ToolboxBusy():Promise<boolean>;

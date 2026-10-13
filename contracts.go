@@ -124,12 +124,12 @@ type CookieImportEntry struct {
 // CookieImportResult ImportPlatformCookie 的返回。
 // 与 CookiePickResult 同理,取消分支原本没有 ok 键,现在会补上 ok:false —— 前端先判 canceled,行为不变。
 type CookieImportResult struct {
-	OK       bool               `json:"ok"`
-	Message  string             `json:"message,omitempty"`
-	Canceled bool               `json:"canceled,omitempty"`
+	OK       bool                `json:"ok"`
+	Message  string              `json:"message,omitempty"`
+	Canceled bool                `json:"canceled,omitempty"`
 	Saved    []CookieImportEntry `json:"saved,omitempty"`
-	Dropped  int                `json:"dropped,omitempty"`
-	Dir      string             `json:"dir,omitempty"`
+	Dropped  int                 `json:"dropped,omitempty"`
+	Dir      string              `json:"dir,omitempty"`
 }
 
 // CookieRemoveResult RemovePlatformCookie 的返回

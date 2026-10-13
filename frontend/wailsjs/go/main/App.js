@@ -6,6 +6,10 @@ export function AddLinks(arg1) {
   return window['go']['main']['App']['AddLinks'](arg1);
 }
 
+export function CancelToolboxTask() {
+  return window['go']['main']['App']['CancelToolboxTask']();
+}
+
 export function CheckBrowserRunning(arg1) {
   return window['go']['main']['App']['CheckBrowserRunning'](arg1);
 }
@@ -56,6 +60,10 @@ export function InstallFFmpeg() {
 
 export function InstallUpdate(arg1) {
   return window['go']['main']['App']['InstallUpdate'](arg1);
+}
+
+export function MergeVideoAudio(arg1, arg2, arg3) {
+  return window['go']['main']['App']['MergeVideoAudio'](arg1, arg2, arg3);
 }
 
 export function OpenBilibili() {
@@ -110,6 +118,14 @@ export function PauseTask(arg1) {
   return window['go']['main']['App']['PauseTask'](arg1);
 }
 
+export function PickToolboxAudio() {
+  return window['go']['main']['App']['PickToolboxAudio']();
+}
+
+export function PickToolboxVideo() {
+  return window['go']['main']['App']['PickToolboxVideo']();
+}
+
 export function RemovePlatformCookie(arg1) {
   return window['go']['main']['App']['RemovePlatformCookie'](arg1);
 }
@@ -142,6 +158,10 @@ export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
 }
 
+export function SplitVideoStream(arg1, arg2) {
+  return window['go']['main']['App']['SplitVideoStream'](arg1, arg2);
+}
+
 export function StartAllTasks() {
   return window['go']['main']['App']['StartAllTasks']();
 }
@@ -152,4 +172,8 @@ export function StartTask(arg1) {
 
 export function TestProxy(arg1) {
   return window['go']['main']['App']['TestProxy'](arg1);
+}
+
+export function ToolboxBusy() {
+  return window['go']['main']['App']['ToolboxBusy']();
 }
