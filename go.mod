@@ -1,6 +1,6 @@
 module github.com/codex/youtube-downloader-demo
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/bodgit/sevenzip v1.6.5
