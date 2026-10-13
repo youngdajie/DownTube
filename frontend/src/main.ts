@@ -95,21 +95,89 @@ const STATUS_CLASS: Record<string, string> = { 等待中: 'waiting', 准备中: 
 /**
  * 全局界面状态。
  *
- * 这里显式标注类型,是为了让 tasks / cookiePlatforms 拿到元素类型 ——
- * 否则空数组会被推断成 never[],导致后续所有 `task.xxx` 都报「属性不存在」。
- * 字面量取值收成联合类型,拼错会在编译期被发现。
+ * **刻意不写索引签名** —— 之前用 `[key: string]: any` 兜住未声明字段,结果 59 个字段里
+ * 只有 8 个真正受类型约束,`state.maxConcurrnt` 这类拼写错误根本不会被发现。
+ * 现在每个字段都必须显式声明,漏一个 tsc 就会报错(而不是悄悄放行)。
+ *
+ * 字面量取值收成联合类型,拼错会在编译期被发现;取值开放的地方用 string。
  */
 interface AppState {
+  // —— 视图状态:取值封闭,收成联合类型 ——
   page: 'downloads' | 'settings' | 'about'
   theme: 'light' | 'dark'
   queueStep: 'add' | 'list'
   linkMode: 'batch' | 'single'
+  videoCodec: 'auto' | 'hevc'
+  hevcEncoder: 'auto' | 'cpu'
+
+  // —— 任务队列 ——
   tasks: Task[]
   filter: string
-  cookiePlatforms: CookieStatus['platforms'] & unknown[]
+  draftLink: string
+
+  // —— 下载设置(取值来自后端 Settings 或自定义下拉,保持 string) ——
+  quality: string
+  type: string
+  folder: string
+  useProxy: boolean
+  proxyURL: string
+  autoDetectProxy: boolean
+  maxConcurrent: number
+  autoRetry: number
+  highFrameRate: boolean
+  openOnComplete: boolean
+
+  // —— Cookies ——
+  useBrowserCookie: boolean
+  cookieSource: string
+  cookieBrowser: string
+  cookieFile: string
+  cookiePlatforms: CookiePlatform[]
+  cookieDir: string
+  /** 正在进行中的 Cookies 操作(导入/移除),用于按钮置灰;空串表示空闲 */
+  cookieBusy: string
+  browserRunning: boolean
+
+  // —— 内核与 FFmpeg ——
+  encoderHint: string
+  engineReady: boolean
+  engineError: string
+  ffmpegReady: boolean
+  ffmpegPath: string
+  ffmpegVersion: string
+  dataDir: string
+  ffmpegModal: boolean
+  ffmpegBusy: boolean
+  ffmpegProgress: number
+  ffmpegPhase: string
+  ffmpegMessage: string
+
+  // —— 代理 ——
+  proxyChecked: boolean
+  proxyReady: boolean
+  proxyMessage: string
+
+  // —— 界面交互 ——
+  windowMaximized: boolean
+  enterAnim: boolean
+  settingsSection: string
+  settingsDirty: boolean
+  /** 保存前的设置草稿快照,用于「撤销更改」;存的是本地草稿形状,不是后端 Settings */
   settingsBaseline: Record<string, any> | null
-  /** 后端返回的动态字段一律放开索引,避免为了过类型而层层断言 */
-  [key: string]: any
+
+  // —— 版本更新 ——
+  updateChecking: boolean
+  updateChecked: boolean
+  updateHas: boolean
+  updateLatest: string
+  updateNotes: string
+  updateUrl: string
+  updatePageUrl: string
+  updateSource: string
+  updatePhase: string
+  updateProgress: number
+  updateMessage: string
+  updateError: string
 }
 
 const state: AppState = {
@@ -918,7 +986,7 @@ root.addEventListener('click', event => {
   const sectionBtn = (event.target as HTMLElement).closest<HTMLElement>('[data-section]')
   if (sectionBtn) {
     if (sectionBtn.dataset.section !== state.settingsSection) {
-      state.settingsSection = sectionBtn.dataset.section
+      state.settingsSection = sectionBtn.dataset.section!
       scrollReset = true
       render()
     }
