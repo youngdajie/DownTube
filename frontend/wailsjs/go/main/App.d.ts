@@ -34,7 +34,7 @@ export function InstallFFmpeg():Promise<main.FFmpegInstallResult>;
 
 export function InstallUpdate(arg1:string):Promise<main.UpdateInstallResult>;
 
-export function MergeVideoAudio(arg1:string,arg2:string,arg3:boolean):Promise<main.ToolboxStartResult>;
+export function MergeVideoAudio(arg1:string,arg2:string):Promise<main.ToolboxStartResult>;
 
 export function OpenBilibili():Promise<void>;
 
@@ -82,7 +82,7 @@ export function SelectFolder():Promise<string>;
 
 export function Snapshot():Promise<main.Snapshot>;
 
-export function SplitVideoStream(arg1:string,arg2:boolean):Promise<main.ToolboxStartResult>;
+export function SplitVideoStream(arg1:string):Promise<main.ToolboxStartResult>;
 
 export function StartAllTasks():Promise<main.Snapshot>;
 

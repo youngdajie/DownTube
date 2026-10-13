@@ -66,8 +66,8 @@ export function InstallUpdate(arg1) {
   return window['go']['main']['App']['InstallUpdate'](arg1);
 }
 
-export function MergeVideoAudio(arg1, arg2, arg3) {
-  return window['go']['main']['App']['MergeVideoAudio'](arg1, arg2, arg3);
+export function MergeVideoAudio(arg1, arg2) {
+  return window['go']['main']['App']['MergeVideoAudio'](arg1, arg2);
 }
 
 export function OpenBilibili() {
@@ -162,8 +162,8 @@ export function Snapshot() {
   return window['go']['main']['App']['Snapshot']();
 }
 
-export function SplitVideoStream(arg1, arg2) {
-  return window['go']['main']['App']['SplitVideoStream'](arg1, arg2);
+export function SplitVideoStream(arg1) {
+  return window['go']['main']['App']['SplitVideoStream'](arg1);
 }
 
 export function StartAllTasks() {

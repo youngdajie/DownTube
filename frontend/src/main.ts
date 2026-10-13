@@ -185,8 +185,6 @@ interface AppState {
   toolboxVideoInfo: string
   toolboxAudio: string
   toolboxAudioInfo: string
-  /** 是否用显卡加速重编码;不勾选则走流复制(无损、瞬间完成) */
-  toolboxReencode: boolean
   toolboxBusy: boolean
   toolboxPhase: string
   toolboxProgress: number
@@ -268,7 +266,6 @@ const state: AppState = {
   toolboxVideoInfo: '',
   toolboxAudio: '',
   toolboxAudioInfo: '',
-  toolboxReencode: false,
   toolboxBusy: false,
   toolboxPhase: '',
   toolboxProgress: 0,
@@ -865,7 +862,7 @@ function renderToolboxFFmpeg() {
   return `<div class="tb-card">
     <div class="tb-card-head">
       <span class="tb-card-icon">${icon('sliders', 18)}</span>
-      <div><h2>FFmpeg 工具</h2><span class="card-sub">音视频合并与分离，支持显卡硬件加速</span></div>
+      <div><h2>FFmpeg 工具</h2><span class="card-sub">音视频合并、分离与压缩</span></div>
     </div>
 
     <div class="tb-panel">
@@ -895,6 +892,7 @@ function renderToolboxFFmpeg() {
         <button class="btn btn-primary btn-sm" id="tbSplit" ${canStart ? '' : 'disabled'}>${icon('undo', 14)}开始分离</button>
       </div>
     </div>
+    <p class="tb-hint">${icon('info', 13)}两个操作都是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。想让文件变小请用下面的「视频压缩」</p>
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('package', 15)}视频压缩</div>
@@ -921,11 +919,6 @@ function renderToolboxFFmpeg() {
       </div>
     </div>
 
-    <label class="tb-switch">
-      <span class="switch"><input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}><span></span></span>
-      <span>重编码压缩体积（显卡加速，输出 H.265）</span>
-    </label>
-    <p class="tb-hint">${icon('info', 13)}不勾选时是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。合并和分离本来就不需要重编码，只有想让文件变小才需要勾选</p>
 
     <div class="tb-progress-wrap" id="tbProgressWrap" ${state.toolboxBusy || state.toolboxResult ? '' : 'hidden'}>
       <div class="tb-progress-head">
@@ -1326,9 +1319,6 @@ function bind() {
   $('#tbMerge')?.addEventListener('click', () => startToolboxTask('merge'))
   $('#tbSplit')?.addEventListener('click', () => startToolboxTask('split'))
   $('#tbCancel')?.addEventListener('click', cancelToolboxTask)
-  $('#tbReencode')?.addEventListener('change', (e) => {
-    state.toolboxReencode = (e.target as HTMLInputElement).checked
-  })
 
   // 百宝箱:视频压缩
   $('#tbPickCompress')?.addEventListener('click', pickToolboxCompressVideo)
@@ -1926,8 +1916,8 @@ async function startToolboxTask(kind: 'merge' | 'split') {
   render()
   try {
     const res = kind === 'merge'
-      ? await api.MergeVideoAudio!(state.toolboxVideo, state.toolboxAudio, state.toolboxReencode)
-      : await api.SplitVideoStream!(state.toolboxVideo, state.toolboxReencode)
+      ? await api.MergeVideoAudio!(state.toolboxVideo, state.toolboxAudio)
+      : await api.SplitVideoStream!(state.toolboxVideo)
     if (!res || res.canceled) {
       // 用户在输出目录弹窗点了取消
       state.toolboxBusy = false

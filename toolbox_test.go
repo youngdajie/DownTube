@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -45,31 +46,31 @@ func TestToolboxRunnerCancel(t *testing.T) {
 	r.end()
 }
 
-// TestToolboxOutputContainers 输出容器必须与编码器匹配,否则 ffmpeg 直接报错。
+// TestToolboxOutputContainers 输出容器必须装得下原编码器,否则流复制时 ffmpeg 直接报错。
 func TestToolboxOutputContainers(t *testing.T) {
 	cases := []struct {
-		codec    string
-		reencode bool
-		wantExt  string
+		codec   string
+		wantExt string
 	}{
-		{"h264", false, ".mp4"},
-		{"hevc", false, ".mp4"},
-		{"av1", false, ".mp4"},
-		{"vp9", false, ".mp4"},
-		{"mpeg4", false, ".mkv"},
-		{"wmv3", false, ".mkv"},
-		// 重编码成 H.265 时一律 mp4:H.265 在 mkv 里能用但 mp4 兼容性最好,
-		// 而 webm 根本不支持 H.265
-		{"vp9", true, ".mp4"},
-		{"h264", true, ".mp4"},
+		{"h264", ".mp4"},
+		{"hevc", ".mp4"},
+		{"av1", ".mp4"},
+		{"vp9", ".mp4"},
+		{"mpeg4", ".mkv"},
+		{"wmv3", ".mkv"},
+		{"", ".mkv"}, // 探测不到编码器时给个宽松容器,别猜 mp4
 	}
 	for _, c := range cases {
-		if got := mergeOutputExt(c.codec, c.reencode); got != c.wantExt {
-			t.Errorf("mergeOutputExt(%q, %v) = %q, 期望 %q", c.codec, c.reencode, got, c.wantExt)
+		if got := mergeOutputExt(c.codec); got != c.wantExt {
+			t.Errorf("mergeOutputExt(%q) = %q, 期望 %q", c.codec, got, c.wantExt)
 		}
-		if got := splitVideoExt(c.codec, c.reencode); got != c.wantExt && !(c.codec == "mpeg4" && got == ".mp4") {
-			t.Errorf("splitVideoExt(%q, %v) = %q, 期望 %q", c.codec, c.reencode, got, c.wantExt)
-		}
+	}
+	// 分离时 mpeg4 用 mp4 也放得下
+	if got := splitVideoExt("mpeg4"); got != ".mp4" {
+		t.Errorf("splitVideoExt(mpeg4) = %q, 期望 .mp4", got)
+	}
+	if got := splitVideoExt("wmv3"); got != ".mkv" {
+		t.Errorf("splitVideoExt(wmv3) = %q, 期望 .mkv", got)
 	}
 }
 
@@ -122,19 +123,25 @@ func TestToolboxOutputNames(t *testing.T) {
 	}
 }
 
-// TestToolboxEncoderCopy 不勾选显卡加速时必须走流复制 —— 合并/分离本身不需要重编码,
-// 强行用显卡编码反而会让「瞬间完成」变成「几分钟且不可无损」。
-func TestToolboxEncoderCopy(t *testing.T) {
-	app := newTestApp()
-	spec, gpu := app.toolboxEncoder("ffmpeg.exe", false)
-	if !gpu {
-		t.Error("流复制路径应当始终可用")
+// TestMergeSplitAreStreamCopy 合并与分离必须只做流复制,不重新编码 ——
+// 压缩是「视频压缩」那个功能的职责,别在这里兼职。
+func TestMergeSplitAreStreamCopy(t *testing.T) {
+	// 这两个函数的签名里不应再出现 reencode / spec 之类的东西,
+	// 用反射挡住以后有人又把重编码塞回来
+	merge := reflect.TypeOf((*App).MergeVideoAudio)
+	if merge.NumIn() != 3 { // 接收者 + videoPath + audioPath
+		t.Errorf("MergeVideoAudio 应有 2 个参数, 实际 %d", merge.NumIn()-1)
 	}
-	if spec.id != "copy" {
-		t.Errorf("流复制 spec.id 应为 copy, 得到 %q", spec.id)
+	split := reflect.TypeOf((*App).SplitVideoStream)
+	if split.NumIn() != 2 { // 接收者 + videoPath
+		t.Errorf("SplitVideoStream 应有 1 个参数, 实际 %d", split.NumIn()-1)
 	}
-	if len(spec.videoArgs) != 2 || spec.videoArgs[0] != "-c:v" || spec.videoArgs[1] != "copy" {
-		t.Errorf("流复制参数应为 -c:v copy, 得到 %v", spec.videoArgs)
+	// 输出容器选择也不该再收 reencode
+	if reflect.TypeOf(mergeOutputExt).NumIn() != 1 {
+		t.Error("mergeOutputExt 不应再收 reencode")
+	}
+	if reflect.TypeOf(splitVideoExt).NumIn() != 1 {
+		t.Error("splitVideoExt 不应再收 reencode")
 	}
 }
 

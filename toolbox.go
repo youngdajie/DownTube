@@ -134,9 +134,10 @@ func (a *App) PickToolboxAudio() FilePickResult {
 
 // MergeVideoAudio 把外部音频合并进视频,替换/补上原视频的音轨。
 //
-// reencode=false 走流复制:不重编码,瞬间完成且无画质损失(推荐)。
-// reencode=true 用显卡编码器把视频重压成 H.265,体积更小但耗时且不可完全无损。
-func (a *App) MergeVideoAudio(videoPath, audioPath string, reencode bool) ToolboxStartResult {
+// **只做流复制,不重新编码** —— 合并的职责是把两路拼起来,不是压缩。
+// 想让文件变小请用「视频压缩」,那里有格式和压缩率的选项。
+// 流复制的好处:瞬间完成,画质零损失。想压体积就别指望这一步顺便做掉。
+func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 	ffmpegPath := a.ffmpegPathForToolbox()
 	if ffmpegPath == "" {
 		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
@@ -150,11 +151,6 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string, reencode bool) Toolbo
 	if _, err := os.Stat(audioPath); err != nil {
 		return ToolboxStartResult{OK: false, Message: "音频文件不存在或无法读取"}
 	}
-	spec, gpu := a.toolboxEncoder(ffmpegPath, reencode)
-	if reencode && !gpu {
-		return ToolboxStartResult{OK: false, Message: "未检测到可用的显卡编码器,请取消勾选「显卡加速」后重试"}
-	}
-
 	// 输出目录:每次弹窗询问,不记、不默认
 	outDir, canceled := a.askToolboxOutputDir()
 	if canceled {
@@ -162,7 +158,7 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string, reencode bool) Toolbo
 	}
 
 	videoCodec, _ := probeVideoCodec(ffmpegPath, videoPath)
-	ext := mergeOutputExt(videoCodec, reencode)
+	ext := mergeOutputExt(videoCodec)
 	outPath := uniqueFilePath(outDir, mergeOutputName(videoPath), ext)
 
 	ctx, ok := a.toolbox.begin()
@@ -171,16 +167,14 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string, reencode bool) Toolbo
 	}
 	go a.runToolboxFFmpeg(ctx, "merge", "正在合并视频与音频", []string{videoPath, audioPath}, outPath, func(args []string) []string {
 		a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", args[0], "-i", args[1]}
-		a = append(a, "-map", "0:v:0", "-map", "1:a:0")
-		a = append(a, "-c:a", "copy")
-		a = append(a, spec.videoArgs...)
+		a = append(a, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy")
 		return append(a, "-movflags", "+faststart", args[2])
 	})
 	return ToolboxStartResult{OK: true}
 }
 
 // SplitVideoStream 把视频拆成独立的视频流文件与音频流文件。
-func (a *App) SplitVideoStream(videoPath string, reencode bool) ToolboxStartResult {
+func (a *App) SplitVideoStream(videoPath string) ToolboxStartResult {
 	ffmpegPath := a.ffmpegPathForToolbox()
 	if ffmpegPath == "" {
 		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
@@ -191,11 +185,6 @@ func (a *App) SplitVideoStream(videoPath string, reencode bool) ToolboxStartResu
 	if _, err := os.Stat(videoPath); err != nil {
 		return ToolboxStartResult{OK: false, Message: "视频文件不存在或无法读取"}
 	}
-	spec, gpu := a.toolboxEncoder(ffmpegPath, reencode)
-	if reencode && !gpu {
-		return ToolboxStartResult{OK: false, Message: "未检测到可用的显卡编码器,请取消勾选「显卡加速」后重试"}
-	}
-
 	videoCodec, _ := probeVideoCodec(ffmpegPath, videoPath)
 	audioCodec, _ := probeAudioCodec(ffmpegPath, videoPath)
 	audioCodec = firstAudioCodec(audioCodec)
@@ -209,7 +198,7 @@ func (a *App) SplitVideoStream(videoPath string, reencode bool) ToolboxStartResu
 	if canceled {
 		return ToolboxStartResult{Canceled: true}
 	}
-	videoExt := splitVideoExt(videoCodec, reencode)
+	videoExt := splitVideoExt(videoCodec)
 	audioExt := splitAudioExt(audioCodec)
 	videoOut := uniqueFilePath(outDir, splitOutputName(videoPath, "视频"), videoExt)
 	audioOut := uniqueFilePath(outDir, splitOutputName(videoPath, "音频"), audioExt)
@@ -218,7 +207,7 @@ func (a *App) SplitVideoStream(videoPath string, reencode bool) ToolboxStartResu
 	if !ok {
 		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
 	}
-	go a.runSplitFFmpeg(ctx, ffmpegPath, videoPath, videoOut, audioOut, spec, reencode, outDir)
+	go a.runSplitFFmpeg(ctx, ffmpegPath, videoPath, videoOut, audioOut, outDir)
 	return ToolboxStartResult{OK: true}
 }
 
@@ -249,16 +238,6 @@ func (a *App) ffmpegPathForToolbox() string {
 	return path
 }
 
-// toolboxEncoder 选择编码参数:不重编码时用流复制;重编码时优先显卡,失败则报错。
-func (a *App) toolboxEncoder(ffmpegPath string, reencode bool) (hevcEncoderSpec, bool) {
-	if !reencode {
-		// 流复制:不编码,自然也不需要显卡
-		return hevcEncoderSpec{id: "copy", label: "无损复制", phase: "复制", videoArgs: []string{"-c:v", "copy"}}, true
-	}
-	spec, gpu := a.resolveHEVCVideoEncoder(ffmpegPath)
-	return spec, gpu
-}
-
 // runToolboxFFmpeg 跑一次两输入(视频 + 音频)的 ffmpeg,上报进度并在结束时发事件。
 func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inputs []string, outPath string, buildArgs func([]string) []string) {
 	defer a.toolbox.end()
@@ -286,7 +265,8 @@ func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inp
 }
 
 // runSplitFFmpeg 跑两次 ffmpeg:先抽视频流,再抽音频流,各自上报进度。
-func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOut, audioOut string, spec hevcEncoderSpec, reencode bool, outDir string) {
+// 两路都走流复制,不重新编码 —— 分离是拆包,不是压缩。
+func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOut, audioOut, outDir string) {
 	defer a.toolbox.end()
 	total, _ := probeDuration(ffmpegPath, videoPath)
 
@@ -294,10 +274,8 @@ func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOu
 	a.emitToolboxProgress("split", 0, "正在分离视频流…")
 	videoArgs := []string{
 		"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats",
-		"-i", videoPath, "-map", "0:v:0", "-an",
+		"-i", videoPath, "-map", "0:v:0", "-an", "-c:v", "copy", videoOut,
 	}
-	videoArgs = append(videoArgs, spec.videoArgs...)
-	videoArgs = append(videoArgs, videoOut)
 	if _, err := a.execToolboxFFmpeg(ctx, ffmpegPath, videoArgs, total, func(percent float64) {
 		// 视频流占总进度的一半
 		a.emitToolboxProgress("split", percent/2, fmt.Sprintf("正在分离视频流 %d%%", int(percent)))
@@ -437,11 +415,8 @@ func firstAudioCodec(s string) string {
 }
 
 // mergeOutputExt / splitVideoExt / splitAudioExt 按编码器挑输出容器。
-// H.264/H.265 用 mp4(兼容性最好);重编码成 H.265 时也一律 mp4。
-func mergeOutputExt(videoCodec string, reencode bool) string {
-	if reencode {
-		return ".mp4"
-	}
+// 走流复制时必须让容器装得下原编码器,否则 ffmpeg 直接报错。
+func mergeOutputExt(videoCodec string) string {
 	switch videoCodec {
 	case "h264", "hevc", "av1", "vp9", "vp8":
 		return ".mp4"
@@ -450,10 +425,7 @@ func mergeOutputExt(videoCodec string, reencode bool) string {
 	}
 }
 
-func splitVideoExt(videoCodec string, reencode bool) string {
-	if reencode {
-		return ".mp4"
-	}
+func splitVideoExt(videoCodec string) string {
 	switch videoCodec {
 	case "h264", "hevc", "av1", "vp9", "vp8", "mpeg4":
 		return ".mp4"
