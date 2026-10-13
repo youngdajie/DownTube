@@ -26,7 +26,7 @@ Windows 桌面版 YouTube 下载工具。界面由 Wails + WebView2 提供，任
 
 ## 环境
 
-- Go 1.27+
+- Go 1.27.2+（`go.mod` 已声明该最低版本；Go 1.21+ 会自动切换到修复后的工具链）
 - Node.js 18+
 - Windows 10/11、WebView2 Runtime
 
@@ -35,11 +35,13 @@ Windows 桌面版 YouTube 下载工具。界面由 Wails + WebView2 提供，任
 ```powershell
 cd frontend
 npm install
-npm run build
+npm run build      # 会先跑 tsc --noEmit，类型不过就不产出
 cd ..
 go mod tidy
 go run -tags "desktop,dev" .
 ```
+
+前端是 TypeScript（`src/main.ts`），类型定义从 Wails 生成的 `wailsjs/go/models.ts` 取，后端改字段名前端会立刻报错。单独跑类型检查用 `npm run typecheck`。
 
 Wails 应用在 Windows 上必须包含 `desktop` 和 `dev` 构建标签；裸跑 `go run .` 或 `go build .` 会显示“Wails applications will not build without the correct build tags”提示框。也可以使用 Wails CLI：`wails dev`。发布构建使用 `wails build`。
 
@@ -66,7 +68,7 @@ wails build -nsis -clean -platform windows/amd64
 1. 改 `wails.json` 的 `info.productVersion`（顺手同步 `frontend/package.json` 的 `version`）
 2. 版本说明写进 `docs/releases/<版本号>.md`（Release 页的正文就是它，不写就退回 tag 附注）
 3. 提交并推送到 GitHub 与 CNB
-4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.2.8 -m "1.2.8" && git push origin refs/tags/V1.2.8 && git push github refs/tags/V1.2.8`
+4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.3.0 -m "1.3.0" && git push origin refs/tags/V1.3.0 && git push github refs/tags/V1.3.0`
 
 标签格式必须是 `V` + `wails.json` 里的版本号，对不上流水线会直接红掉 ——
 这样就不会出现「安装包是 0.2.0、Release 却挂在 V0.3.0 上」的情况。
