@@ -114,7 +114,7 @@ V*:
 
             # 装 wails CLI。版本跟 go.mod 对齐，升 wails 时这里一起改
             export PATH="$(go env GOPATH)/bin:$PATH"
-            go install github.com/wailsapp/wails/v2/cmd/wails@v2.14.0
+            go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
             wails version
 
             # tools/yt-dlp.exe 由 Git LFS 跟踪。指针文件只有一百来字节，

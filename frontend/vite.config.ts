@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 //   - 这里再注入到前端，界面上显示的是同一个值。
 // 不会出现「属性页已经 0.3.0、界面还写 0.2.0」的错位。
 // CNB 流水线同样从 wails.json 读版本号，用来定 tag 名和安装包文件名。
-const productVersion = JSON.parse(
+const productVersion: string = JSON.parse(
   readFileSync(new URL('../wails.json', import.meta.url), 'utf8')
 ).info.productVersion
 

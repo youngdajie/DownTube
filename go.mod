@@ -4,8 +4,8 @@ go 1.27.0
 
 require (
 	github.com/bodgit/sevenzip v1.6.5
-	github.com/wailsapp/wails/v2 v2.14.0
-	golang.org/x/text v0.40.0
+	github.com/wailsapp/wails/v2 v2.16.0
+	golang.org/x/text v0.43.0
 )
 
 require (
