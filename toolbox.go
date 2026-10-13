@@ -580,9 +580,10 @@ func toolboxCompressQuality(id string) ToolboxCompressQuality {
 
 // CompressVideo 重新编码压缩视频。
 //
-// useGPU=true 时优先显卡编码器(H.264/H.265 有 NVENC/QSV/AMF;VP9 在 Windows 上
-// 没有可用的显卡编码器,会自动回退 CPU),探测失败同样回退 CPU。
-func (a *App) CompressVideo(videoPath, format, quality string, useGPU bool) ToolboxStartResult {
+// 不提供「用不用显卡」的开关:压缩本来就是重编码,有显卡就用、没有就回退 CPU
+// 是显然的选择。让用户再勾一次只会和「输出格式」里的 H.264/H.265 选项重叠。
+// VP9 在 Windows 上没有可用的显卡编码器,固定走 CPU。
+func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResult {
 	ffmpegPath := a.ffmpegPathForToolbox()
 	if ffmpegPath == "" {
 		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
@@ -597,7 +598,7 @@ func (a *App) CompressVideo(videoPath, format, quality string, useGPU bool) Tool
 	preset := toolboxCompressQuality(quality)
 	crf := toolboxCompressCRF(preset.ID)
 
-	videoArgs, _ := a.toolboxCompressVideoArgs(ffmpegPath, target.ID, crf, useGPU)
+	videoArgs := a.toolboxCompressVideoArgs(ffmpegPath, target.ID, crf)
 	audioArgs := toolboxCompressAudioArgs(target.ID)
 
 	outDir, canceled := a.askToolboxOutputDir()
@@ -620,28 +621,28 @@ func (a *App) CompressVideo(videoPath, format, quality string, useGPU bool) Tool
 	return ToolboxStartResult{OK: true}
 }
 
-// toolboxCompressVideoArgs 拼视频编码参数。VP9 的 CRF 模式必须配 -b:v 0,
-// 否则 ffmpeg 会按普通 VBR 跑,画质档位就失效了。
-func (a *App) toolboxCompressVideoArgs(ffmpegPath, formatID string, crf int, useGPU bool) ([]string, bool) {
+// toolboxCompressVideoArgs 拼视频编码参数。
+//
+// 有可用的显卡编码器就用它,并把**用户选的画质值替换进去** ——
+// 参数表里的画质是给下载转码用的固定值,压缩必须尊重用户选的档位,
+// 否则下拉里选什么都不会生效。
+func (a *App) toolboxCompressVideoArgs(ffmpegPath, formatID string, crf int) []string {
 	q := strconv.Itoa(crf)
 	switch formatID {
 	case "mp4-h265":
-		if useGPU {
-			if spec, ok := a.resolveToolboxGPU(ffmpegPath, "hevc"); ok {
-				return spec.videoArgs, true
-			}
+		if spec, ok := a.resolveToolboxGPU(ffmpegPath, "hevc"); ok {
+			return withQuality(spec, crf)
 		}
-		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", q}, false
+		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", q}
 	case "webm-vp9":
-		// Windows 上没有可用的 VP9 显卡编码器,一律走 CPU
-		return []string{"-c:v", "libvpx-vp9", "-crf", q, "-b:v", "0", "-row-mt", "1"}, false
+		// Windows 上没有可用的 VP9 显卡编码器,固定走 CPU。
+		// CRF 模式必须配 -b:v 0,否则 ffmpeg 会按普通 VBR 跑,画质档位失效
+		return []string{"-c:v", "libvpx-vp9", "-crf", q, "-b:v", "0", "-row-mt", "1"}
 	default: // mp4-h264
-		if useGPU {
-			if spec, ok := a.resolveToolboxGPU(ffmpegPath, "h264"); ok {
-				return spec.videoArgs, true
-			}
+		if spec, ok := a.resolveToolboxGPU(ffmpegPath, "h264"); ok {
+			return withQuality(spec, crf)
 		}
-		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", q}, false
+		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", q}
 	}
 }
 

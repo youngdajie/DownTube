@@ -1679,6 +1679,10 @@ type hevcEncoderSpec struct {
 	label     string   // 完整名称(设置页展示)
 	phase     string   // 任务阶段后缀
 	videoArgs []string // ffmpeg 视频编码参数
+	// qualityIdx 画质值在 videoArgs 里的下标。
+	// 下载转码用参数里写死的值;压缩必须换成用户选的档位,替换哪个下标由它指出
+	// (AMF 的 qp_i / qp_p 是两处,所以是切片)。
+	qualityIdx []int
 }
 
 func hevcCPUSpec() hevcEncoderSpec {
@@ -1694,15 +1698,29 @@ func hevcCPUSpec() hevcEncoderSpec {
 // 新增编码器(如 av1)只要在这里加一组即可,探测与回退逻辑不用动。
 var gpuEncoderCandidates = map[string][]hevcEncoderSpec{
 	"h264": {
-		{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", videoArgs: []string{"-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "24", "-b:v", "0"}},
-		{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", videoArgs: []string{"-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "24"}},
-		{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", videoArgs: []string{"-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "22", "-qp_p", "24"}},
+		{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", qualityIdx: []int{9}, videoArgs: []string{"-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "24", "-b:v", "0"}},
+		{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", qualityIdx: []int{5}, videoArgs: []string{"-c:v", "h264_qsv", "-preset", "medium", "-global_quality", "24"}},
+		{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", qualityIdx: []int{7, 9}, videoArgs: []string{"-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "22", "-qp_p", "24"}},
 	},
 	"hevc": {
-		{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "26", "-b:v", "0"}},
-		{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "26"}},
-		{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", videoArgs: []string{"-c:v", "hevc_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"}},
+		{id: "nvenc", label: "NVIDIA 显卡加速(NVENC)", phase: "显卡", qualityIdx: []int{9}, videoArgs: []string{"-c:v", "hevc_nvenc", "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "26", "-b:v", "0"}},
+		{id: "qsv", label: "Intel 核显加速(QSV)", phase: "显卡", qualityIdx: []int{5}, videoArgs: []string{"-c:v", "hevc_qsv", "-preset", "medium", "-global_quality", "26"}},
+		{id: "amf", label: "AMD 显卡加速(AMF)", phase: "显卡", qualityIdx: []int{7, 9}, videoArgs: []string{"-c:v", "hevc_amf", "-quality", "quality", "-rc", "cqp", "-qp_i", "24", "-qp_p", "26"}},
 	},
+}
+
+// withQuality 复制一份编码参数并把画质值换成 crf。**必须复制**:
+// 参数切片是包级共享的,原地改会污染下载转码用的那份。
+func withQuality(spec hevcEncoderSpec, crf int) []string {
+	out := make([]string, len(spec.videoArgs))
+	copy(out, spec.videoArgs)
+	q := strconv.Itoa(crf)
+	for _, i := range spec.qualityIdx {
+		if i >= 0 && i < len(out) {
+			out[i] = q
+		}
+	}
+	return out
 }
 
 // probeHEVCEncoder 用一小段合成画面实测编码器在当前机器上是否可用

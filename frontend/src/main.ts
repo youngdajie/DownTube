@@ -913,12 +913,9 @@ function renderToolboxFFmpeg() {
           <span>压缩率</span>
           ${selectControl('toolboxQuality', state.toolboxCompressQualities.map(q => ({ value: q.id, label: q.label })), state.toolboxCompressQuality, '压缩率')}
         </label>
-        <label class="tb-switch tb-switch-inline">
-          <span class="switch"><input type="checkbox" id="tbCompressGPU" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}><span></span></span>
-          <span>显卡加速</span>
-        </label>
       </div>
       <p class="tb-hint" id="tbQualityNote">${safe(state.toolboxCompressQualities.find(q => q.id === state.toolboxCompressQuality)?.note || '')}</p>
+      <p class="tb-hint">${icon('cpu', 13)}自动使用显卡编码器加速,未检测到可用显卡时回退 CPU</p>
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbCompress" ${state.toolboxCompressVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('package', 14)}开始压缩</button>
       </div>
@@ -926,7 +923,7 @@ function renderToolboxFFmpeg() {
 
     <label class="tb-switch">
       <span class="switch"><input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}><span></span></span>
-      <span>显卡加速重编码（输出 H.265，文件更小）</span>
+      <span>重编码压缩体积（显卡加速，输出 H.265）</span>
     </label>
     <p class="tb-hint">${icon('info', 13)}不勾选时是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。合并和分离本来就不需要重编码，只有想让文件变小才需要勾选</p>
 
@@ -1336,9 +1333,6 @@ function bind() {
   // 百宝箱:视频压缩
   $('#tbPickCompress')?.addEventListener('click', pickToolboxCompressVideo)
   $('#tbCompress')?.addEventListener('click', startToolboxCompress)
-  $('#tbCompressGPU')?.addEventListener('change', (e) => {
-    state.toolboxReencode = (e.target as HTMLInputElement).checked
-  })
 
   // 版本更新
   $('#checkUpdateBtn')?.addEventListener('click', () => checkUpdate(true))
@@ -2026,8 +2020,7 @@ async function startToolboxCompress() {
     const res = await api.CompressVideo!(
       state.toolboxCompressVideo,
       state.toolboxCompressFormat,
-      state.toolboxCompressQuality,
-      state.toolboxReencode
+      state.toolboxCompressQuality
     )
     if (!res || res.canceled) {
       state.toolboxBusy = false

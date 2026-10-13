@@ -22,8 +22,8 @@ export function ClearTasks() {
   return window['go']['main']['App']['ClearTasks']();
 }
 
-export function CompressVideo(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['CompressVideo'](arg1, arg2, arg3, arg4);
+export function CompressVideo(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CompressVideo'](arg1, arg2, arg3);
 }
 
 export function CookieStatus() {

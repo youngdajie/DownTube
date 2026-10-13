@@ -1214,29 +1214,31 @@ h1, h2, h3, p { margin: 0; }
 .tb-switch-inline { flex: none; padding-bottom: 7px; white-space: nowrap; }
 
 /* ============================================================ 侧边栏左下角装饰 */
-/* 默认虚化并压暗,鼠标移上去才清晰 —— 只做点缀,不抢导航的注意力 */
+/* 铺满左下角并贴齐边缘:用负 margin 抵消侧边栏自身的 padding,
+   让它真正顶到左边缘和底边,而不是缩在 padding 里面 */
 .sidebar-mark {
-  flex: none; margin-top: auto; padding: 4px 0 2px;
-  display: grid; place-items: center;
+  flex: none; margin-top: auto;
+  margin-left: -12px; margin-right: -12px; margin-bottom: -12px;
+  line-height: 0;
   pointer-events: none;          /* 不拦截点击,导航区照常可用 */
 }
 .sidebar-mark img {
-  width: 46px; height: 46px; object-fit: contain;
-  filter: blur(3px) saturate(.55);
-  opacity: .3;
+  display: block; width: 100%; height: auto;
+  filter: blur(5px) saturate(.5);
+  opacity: .22;
+  transform: scale(1.04);
   transition: filter .45s ease, opacity .45s ease, transform .45s ease;
-  transform: scale(.94);
 }
 .sidebar:hover .sidebar-mark img,
 .sidebar-mark:hover img {
   filter: blur(0) saturate(1);
-  opacity: .82;
+  opacity: .7;
   transform: scale(1);
 }
-.sidebar-mark img:hover { opacity: 1; }
-:root[data-theme="dark"] .sidebar-mark img { filter: blur(3px) saturate(.4) brightness(.8); opacity: .24; }
+.sidebar-mark img:hover { opacity: .95; }
+:root[data-theme="dark"] .sidebar-mark img { filter: blur(5px) saturate(.35) brightness(.75); opacity: .18; }
 :root[data-theme="dark"] .sidebar:hover .sidebar-mark img,
-:root[data-theme="dark"] .sidebar-mark:hover img { filter: blur(0) saturate(.9) brightness(1); opacity: .8; }
+:root[data-theme="dark"] .sidebar-mark:hover img { filter: blur(0) saturate(.85) brightness(1); opacity: .68; }
 
 /* ============================================================ 百宝箱:开关与下拉 */
 /* 与设置页 .row-split 一致:文字在左、开关在右。两处开关都走这一条,别一个左一个右 */

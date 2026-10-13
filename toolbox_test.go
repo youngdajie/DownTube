@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 )
@@ -124,7 +125,7 @@ func TestToolboxOutputNames(t *testing.T) {
 // TestToolboxEncoderCopy 不勾选显卡加速时必须走流复制 —— 合并/分离本身不需要重编码,
 // 强行用显卡编码反而会让「瞬间完成」变成「几分钟且不可无损」。
 func TestToolboxEncoderCopy(t *testing.T) {
-	app := &App{}
+	app := newTestApp()
 	spec, gpu := app.toolboxEncoder("ffmpeg.exe", false)
 	if !gpu {
 		t.Error("流复制路径应当始终可用")
@@ -209,7 +210,7 @@ func TestToolboxRunnerConcurrent(t *testing.T) {
 
 // TestToolboxCompressOptions 选项必须由后端下发,且三种常用格式都在。
 func TestToolboxCompressOptions(t *testing.T) {
-	app := &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
+	app := newTestApp()
 	opts := app.ToolboxCompressOptionsList()
 	if len(opts.Formats) != 3 {
 		t.Fatalf("应有 3 种格式, 得到 %d", len(opts.Formats))
@@ -254,8 +255,8 @@ func TestToolboxCompressFormatFallback(t *testing.T) {
 
 // TestToolboxCompressArgs 编码参数:CPU 回退、VP9 的 -b:v 0、音频容器匹配。
 func TestToolboxCompressArgs(t *testing.T) {
-	app := &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
-	// 不探测显卡(useGPU=false),必须落到 CPU 编码器
+	app := newTestApp()
+	// 用一个不存在的 ffmpeg 路径 → 探测不到显卡 → 必须落到 CPU 编码器
 	for _, tc := range []struct {
 		format string
 		want   string
@@ -265,12 +266,9 @@ func TestToolboxCompressArgs(t *testing.T) {
 		{"mp4-h265", "libx265", "aac"},
 		{"webm-vp9", "libvpx-vp9", "libopus"},
 	} {
-		args, gpu := app.toolboxCompressVideoArgs("ffmpeg.exe", tc.format, 26, false)
-		if gpu {
-			t.Errorf("%s 未勾选显卡却走了显卡", tc.format)
-		}
+		args := app.toolboxCompressVideoArgs("Z:/不存在/ffmpeg.exe", tc.format, 26)
 		if !containsArg(args, "-c:v", tc.want) {
-			t.Errorf("%s 应使用 %s, 实际参数 %v", tc.format, tc.want, args)
+			t.Errorf("%s 无显卡时应回退 %s, 实际参数 %v", tc.format, tc.want, args)
 		}
 		if !containsArg(args, "-crf", "26") {
 			t.Errorf("%s 应带上 -crf 26, 实际参数 %v", tc.format, args)
@@ -281,7 +279,7 @@ func TestToolboxCompressArgs(t *testing.T) {
 		}
 	}
 	// VP9 的 CRF 模式必须配 -b:v 0,否则按 VBR 跑,画质档位失效
-	vp9, _ := app.toolboxCompressVideoArgs("ffmpeg.exe", "webm-vp9", 28, false)
+	vp9 := app.toolboxCompressVideoArgs("Z:/不存在/ffmpeg.exe", "webm-vp9", 28)
 	if !containsArg(vp9, "-b:v", "0") {
 		t.Errorf("VP9 必须配 -b:v 0, 实际 %v", vp9)
 	}
@@ -294,10 +292,68 @@ func TestToolboxCompressArgs(t *testing.T) {
 	}
 }
 
+// TestWithQuality 用户选的压缩率必须真的替换进显卡参数。
+//
+// 这条挡的是一个真实存在过的 bug:显卡参数里的画质值是写死的(-cq 26),
+// 压缩时无论下拉选哪一档,编码器都用 26 —— 选项看着能选,实际不生效。
+func TestWithQuality(t *testing.T) {
+	for name, cands := range gpuEncoderCandidates {
+		for _, spec := range cands {
+			if len(spec.qualityIdx) == 0 {
+				t.Errorf("%s/%s 没有声明 qualityIdx,压缩时画质档位会失效", name, spec.id)
+				continue
+			}
+			for _, crf := range []int{20, 26, 32} {
+				got := withQuality(spec, crf)
+				for _, i := range spec.qualityIdx {
+					if got[i] != strconv.Itoa(crf) {
+						t.Errorf("%s/%s crf=%d: 下标 %d 应为 %d, 实际 %q",
+							name, spec.id, crf, i, crf, got[i])
+					}
+				}
+			}
+			// 原始参数不能被改动 —— 下载转码用的就是那份
+			for _, i := range spec.qualityIdx {
+				if spec.videoArgs[i] == strconv.Itoa(20) {
+					t.Errorf("%s/%s 原地改动了共享参数(下标 %d 变成 20)", name, spec.id, i)
+				}
+			}
+		}
+	}
+}
+
+// TestWithQualityDoesNotMutateShared 共享参数切片必须保持不变。
+func TestWithQualityDoesNotMutateShared(t *testing.T) {
+	spec := gpuEncoderCandidates["hevc"][0]
+	before := append([]string(nil), spec.videoArgs...)
+	_ = withQuality(spec, 32)
+	_ = withQuality(spec, 18)
+	for i := range before {
+		if spec.videoArgs[i] != before[i] {
+			t.Fatalf("withQuality 改动了共享参数: 下标 %d 从 %q 变成 %q", i, before[i], spec.videoArgs[i])
+		}
+	}
+	// 连续两次调用结果互不影响:各自带着自己的画质值
+	a := withQuality(spec, 20)
+	b := withQuality(spec, 32)
+	for _, i := range spec.qualityIdx {
+		if a[i] != "20" || b[i] != "32" {
+			t.Errorf("两次调用互相污染: 下标 %d 得到 a=%q b=%q", i, a[i], b[i])
+		}
+	}
+	// 第三次仍拿到干净的值(不是上一次的残留)
+	c := withQuality(spec, 26)
+	for _, i := range spec.qualityIdx {
+		if c[i] != "26" {
+			t.Errorf("第三次调用拿到残留值: 下标 %d = %q", i, c[i])
+		}
+	}
+}
+
 // TestToolboxCompressGPUProbeCache 显卡探测结果要按「编码器 + ffmpeg 路径」缓存,
 // 且探测不到时缓存 false,不会每次压缩都重新探测一遍。
 func TestToolboxCompressGPUProbeCache(t *testing.T) {
-	app := &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
+	app := newTestApp()
 	// 用一个不可能存在的 ffmpeg 路径:探测必然失败,但结果要被缓存
 	if _, ok := app.resolveToolboxGPU("Z:/不存在的/ffmpeg.exe", "h264"); ok {
 		t.Error("不存在的 ffmpeg 不该探测到显卡编码器")
@@ -330,7 +386,7 @@ func TestCompressOutputName(t *testing.T) {
 
 // TestToolboxCompressContractKeys 压缩接口的 JSON 键集。
 func TestToolboxCompressContractKeys(t *testing.T) {
-	opts := (&App{toolboxGPU: make(map[string]*hevcEncoderSpec)}).ToolboxCompressOptionsList()
+	opts := newTestApp().ToolboxCompressOptionsList()
 	assertSameKeys(t, "ToolboxCompressOptions",
 		map[string]any{"formats": []any{}, "quality": []any{}}, opts)
 	assertSameKeys(t, "ToolboxCompressFormat",
@@ -346,4 +402,10 @@ func containsArg(args []string, flag, value string) bool {
 		}
 	}
 	return false
+}
+
+// newTestApp 造一个只填了必要字段的 App,测试里统一用它,
+// 免得每次都要记得初始化 toolboxGPU 这个 map。
+func newTestApp() *App {
+	return &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
 }
