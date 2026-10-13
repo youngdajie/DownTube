@@ -827,13 +827,13 @@ function renderToolboxRecommend() {
   return `<div class="tb-card">
     <div class="tb-card-head">
       <span class="tb-card-icon">${icon('shield', 18)}</span>
-      <div><h2>推荐</h2><span class="card-sub">抖音网页端的更好用法</span></div>
+      <div><h2>推荐</h2><span class="card-sub">抖音网页端更好用的办法</span></div>
     </div>
     <div class="tb-recommend">
       <div class="tb-recommend-body">
-        <h3>Tampermonkey 脚本 · Edge 浏览器插件</h3>
-        <p>在 Edge 里安装油猴插件后导入该脚本，可以<b>直接下载抖音网页端的视频</b>，并去掉大量干扰元素，浏览体验比裸网页版好很多。</p>
-        <p class="tb-recommend-tip">${icon('checkcircle', 14)}下载抖音视频<b>强烈推荐用这个插件</b>，比在本工具里粘贴链接更稳、画质也更完整</p>
+        <h3>Tampermonkey 脚本 · Edge 插件</h3>
+        <p>给 Edge 装上油猴插件、导入这个脚本，抖音网页端就能<b>直接下载视频</b>，页面上的干扰元素也会一并清掉</p>
+        <p class="tb-recommend-tip">${icon('checkcircle', 14)}下载抖音视频优先用这个插件，比在下载队列里贴链接更稳，画质也更完整</p>
       </div>
       <div class="tb-recommend-actions">
         <button class="btn btn-primary btn-sm" id="tbOpenRepo">${icon('external', 14)}打开仓库</button>
@@ -850,12 +850,12 @@ function renderToolboxFFmpeg() {
   return `<div class="tb-card">
     <div class="tb-card-head">
       <span class="tb-card-icon">${icon('sliders', 18)}</span>
-      <div><h2>FFmpeg 工具</h2><span class="card-sub">视频音频合并与分离,支持显卡硬件加速</span></div>
+      <div><h2>FFmpeg 工具</h2><span class="card-sub">音视频合并与分离，支持显卡硬件加速</span></div>
     </div>
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('layers', 15)}视频音频合并</div>
-      <p class="tb-panel-desc">把选中的音频合并进视频,替换掉原视频的音轨。适合「下载到的是无声视频,需要另找的音轨」这种情况。</p>
+      <p class="tb-panel-desc">把外部音频合并进视频，替换原来的音轨。适合下载到无声视频、需要另外配一条音轨的情况</p>
       <div class="tb-files">
         <div class="tb-file">
           <span class="tb-file-tag">视频</span>
@@ -875,7 +875,7 @@ function renderToolboxFFmpeg() {
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('undo', 15)}视频分离</div>
-      <p class="tb-panel-desc">把一个视频拆成独立的视频流文件和音频流文件。适合「只想要其中一路」或者「想换封装/换音轨」的情况。</p>
+      <p class="tb-panel-desc">把视频拆成独立的视频流和音频流两个文件。适合只想要其中一路，或者想自己重新拼一次的情况</p>
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbSplit" ${canStart ? '' : 'disabled'}>${icon('undo', 14)}开始分离</button>
       </div>
@@ -883,9 +883,9 @@ function renderToolboxFFmpeg() {
 
     <label class="tb-switch">
       <input type="checkbox" id="tbReencode" ${state.toolboxReencode ? 'checked' : ''} ${state.toolboxBusy ? 'disabled' : ''}>
-      <span>显卡加速重编码(输出 H.265,体积更小)</span>
+      <span>显卡加速重编码（输出 H.265，文件更小）</span>
     </label>
-    <p class="tb-hint">${icon('info', 13)}不勾选时走<b>无损流复制</b>:不重新编码,瞬间完成且画质零损失。合并与分离本身不需要重编码,只有想让文件变更小才需要勾选。</p>
+    <p class="tb-hint">${icon('info', 13)}不勾选时是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。合并和分离本来就不需要重编码，只有想让文件变小才需要勾选</p>
 
     <div class="tb-progress-wrap" id="tbProgressWrap" ${state.toolboxBusy || state.toolboxResult ? '' : 'hidden'}>
       <div class="tb-progress-head">
@@ -898,7 +898,7 @@ function renderToolboxFFmpeg() {
       </div>
     </div>
     ${state.toolboxResult ? `<p class="tb-result ${state.toolboxResult.startsWith('失败') ? 'error' : ''}">${safe(state.toolboxResult)}</p>` : ''}
-    <p class="tb-outdir-note">${icon('folder', 13)}输出文件夹<b>每次都会弹窗询问</b>,不会自动保存、也不会记住上次的位置</p>
+    <p class="tb-outdir-note">${icon('folder', 13)}输出文件夹<b>每次都会弹窗询问</b>，不自动保存，也不记住上次的位置</p>
   </div>`
 }
 
