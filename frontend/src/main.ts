@@ -857,6 +857,11 @@ function renderToolboxRecommend() {
 }
 
 /** FFmpeg 工具箱:合并 / 分离 */
+/** 取某档压缩率的说明;均衡档不需要说明(它就是默认值),返回空串 */
+function noteOfQuality(id: string) {
+  return state.toolboxCompressQualities.find(q => q.id === id)?.note || ''
+}
+
 function renderToolboxFFmpeg() {
   const canStart = !!state.toolboxVideo && !state.toolboxBusy
   return `<div class="tb-card">
@@ -912,8 +917,8 @@ function renderToolboxFFmpeg() {
           ${selectControl('toolboxQuality', state.toolboxCompressQualities.map(q => ({ value: q.id, label: q.label })), state.toolboxCompressQuality, '压缩率')}
         </label>
       </div>
-      <p class="tb-hint" id="tbQualityNote">${safe(state.toolboxCompressQualities.find(q => q.id === state.toolboxCompressQuality)?.note || '')}</p>
-      <p class="tb-hint">${icon('cpu', 13)}自动使用显卡编码器加速,未检测到可用显卡时回退 CPU</p>
+      <p class="tb-hint" id="tbQualityNote" ${noteOfQuality(state.toolboxCompressQuality) ? '' : 'hidden'}>${safe(noteOfQuality(state.toolboxCompressQuality))}</p>
+      <p class="tb-hint">${icon('cpu', 13)}自动使用显卡编码器加速，未检测到可用显卡时回退 CPU</p>
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbCompress" ${state.toolboxCompressVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('package', 14)}开始压缩</button>
       </div>
@@ -1992,8 +1997,9 @@ async function pickToolboxCompressVideo() {
 function patchToolboxQualityNote() {
   const note = $('#tbQualityNote')
   if (!note) return
-  const q = state.toolboxCompressQualities.find(x => x.id === state.toolboxCompressQuality)
-  note.textContent = q?.note || ''
+  const text = noteOfQuality(state.toolboxCompressQuality)
+  note.textContent = text
+  note.hidden = !text   // 没说明就把整行收起来,别留一个空行
 }
 
 async function startToolboxCompress() {

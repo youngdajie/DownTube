@@ -1,5 +1,29 @@
 package main
 
+// 前后端之间的「线上格式」契约。**这个文件不是前端迁移的遗留物,别顺手删。**
+//
+// 背景:后端过去用 map[string]any 拼返回值,1.3.0 起改成 contracts.go 里的结构体。
+// 当时写这些用例是为了证明改造没改变 JSON 形状 —— 但它们的价值不止于此。
+//
+// 现在它守的是 **TypeScript 实际挡不住的那一类问题**(已实测,不是推测):
+//
+//   - Wails 会把 omitempty 字段生成成可选类型(`error?: string`),看着像个防线,
+//     但前端写的是 `state.updateError = result?.error || '检查更新失败'` ——
+//     那个 `||` 兜底把 undefined 咽掉了,于是 tsc 一声不吭地放行。
+//     实测过程:给 UpdateResult.Error 加 omitempty → 重新生成 → tsc 报 0 错。
+//   - 但**运行时的行为变了**:带 omitempty 且值为空时,这个键会从 JSON 里整个消失,
+//     前端拿到 undefined,于是用户看到的是兜底文案而不是真实原因。
+//   - 所以哪些字段必须常驻是刻意区分的,不是随手写的:
+//     UpdateResult.Error 常驻(前端拼提示要用);
+//     UpdateDownloadResult.Error 带 omitempty(只有失败时才有意义)。
+//     谁"顺手统一一下"加个 omitempty,就会踩到上面那个坑。
+//
+// 实测:给 UpdateResult.Error 加 omitempty,TestContractKeysUnchanged 立刻报
+//   「旧: [... error ...] / 新: [... 无 error ...]」,指向性很清楚。
+//
+// 所以:改了响应结构体、或改了 json tag,这些用例失败是**预期行为** ——
+// 先确认这次改动是有意的,再更新下面的期望值。
+
 import (
 	"encoding/json"
 	"sort"

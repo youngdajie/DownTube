@@ -508,7 +508,7 @@ var toolboxCompressFormats = []ToolboxCompressFormat{
 // 压缩率三档,CRF 越小画质越好、文件越大。均衡是默认档。
 var toolboxCompressQualities = []ToolboxCompressQuality{
 	{ID: "high", Label: "高画质", Note: "几乎看不出差别"},
-	{ID: "balanced", Label: "均衡", Note: "推荐"},
+	{ID: "balanced", Label: "均衡"},
 	{ID: "small", Label: "小体积", Note: "画质有可见损失"},
 }
 
