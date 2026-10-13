@@ -364,7 +364,7 @@ function renderAddView() {
       <div class="sites-head"><b>支持的站点</b><span>下载内核为 yt-dlp，只要它支持，这里多半也能下</span></div>
       <div class="sites-group"><span class="sites-label">视频</span><p>YouTube、哔哩哔哩、抖音、西瓜视频、优酷、爱奇艺、腾讯视频、芒果TV、微博、TikTok、Twitter/X、Instagram、Facebook、Vimeo、Twitch、Reddit、Dailymotion</p></div>
       <div class="sites-group"><span class="sites-label">音乐</span><p>SoundCloud、Bandcamp、网易云音乐、QQ音乐</p></div>
-      <p class="sites-caveat">yt-dlp 支持 1700 多个站点，上面只是常见示例。站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入</p>
+      <p class="sites-caveat">yt-dlp 支持 1700 多个站点，上面只是常见示例。站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入。另外，<b>播放列表、频道、合集与 UP 主空间的链接会把它下面的每个视频都逐个下载</b>，而队列里只显示一条任务，可能需要非常久。</p>
     </div>
   </div>`
 }
@@ -1081,6 +1081,37 @@ async function syncWindowButtons() {
 // ============================================================
 // 下载流程
 // ============================================================
+// looksLikeManyVideos 判断链接是否可能对应「视频很多」的页面（播放列表、频道、合集、UP 主空间）。
+// 这类页面的地址看起来和单个视频一模一样，但下载内核会把页面下的每个视频都拉下来，
+// 而任务列表里只显示一条，很容易让人以为卡住了或在反复重试。
+// 这里只做提示、不阻断 —— 用户可能确实想要整张列表。
+const MANY_VIDEOS_PATTERNS = [
+  /[?&]list=/,            // YouTube 播放列表参数
+  /\/playlist\b/,
+  /\/channel\//,
+  /\/@[\w.\-]+/,
+  /\/c\/[\w.\-]+/,
+  /\/user\//,
+  /\/videos\b/,
+  /\/series\b/,
+  /\/album\b/,
+  /space\.bilibili\.com/,  // B 站 UP 主空间
+  /\/medialist\//,
+  /\/bangumi\//,
+  /\/festival\//,
+  /collection/,
+  /[?&]sid=/,            // B 站合集参数
+  /[?&]season_id=/,
+]
+const looksLikeManyVideos = (raw) => {
+  try {
+    const u = new URL(raw)
+    // 域名也要参与匹配:B 站 UP 主空间是 space.bilibili.com/<数字>，特征在 host 上
+    const target = u.host + u.pathname + u.search
+    return MANY_VIDEOS_PATTERNS.some(re => re.test(target))
+  } catch { return false }
+}
+
 async function parseLinks() {
   const input = document.querySelector('#linkInput')
   const raw = (state.draftLink || '').trim()
@@ -1108,7 +1139,12 @@ async function parseLinks() {
   state.queueStep = 'list'
   scrollReset = true
   render()
+  // 提示放在成功提示之后：先告诉用户已加入，再补一句风险提醒
   toast(list.length > 1 ? `已加入 ${list.length} 个任务` : '已加入 1 个任务')
+  const risky = list.filter(looksLikeManyVideos)
+  if (risky.length) {
+    setTimeout(() => toast('其中 ' + risky.length + ' 个链接像是播放列表或合集页，会把页面下的每个视频都逐个下载，可能需要很久'), 2600)
+  }
 }
 
 async function pasteFromClipboard() {

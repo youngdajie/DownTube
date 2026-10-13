@@ -2,8 +2,12 @@ package main
 
 import (
 	"math"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestNormalizeVideoURLAcceptsAnySite 下载内核是 yt-dlp,不该只放行 YouTube。
@@ -158,4 +162,77 @@ func TestEngineErrorTextFallback(t *testing.T) {
 	if got := engineErrorZh(multi); got != "视频不可用，可能已被删除或设为私享" {
 		t.Fatalf("重复报错应去重,得到 %q", got)
 	}
+}
+
+// TestKillProcessTreeTakesChildrenDown 验证取消时能终结整棵进程树,而不只是父进程。
+//
+// 这是「清空队列后后台仍在下载」的根因:Windows 上父进程被杀后子进程会继续存活,
+// 而下载真正干活的那个进程常常正是子进程(yt-dlp 拉起的 ffmpeg 分片下载器)。
+// 只验证父进程会漏掉这个场景,所以这里造出 cmd → cmd → ping 三层,
+// 确认最里层的 ping 也会跟着消失。
+func TestKillProcessTreeTakesChildrenDown(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("仅在 Windows 上验证 taskkill /T 行为")
+	}
+	pidsByName := func(name string) map[int]bool {
+		out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq "+name, "/NH", "/FO", "CSV").Output()
+		if err != nil {
+			t.Fatalf("tasklist 失败: %v", err)
+		}
+		res := map[int]bool{}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			// tasklist 返回的镜像名是大写(PING.EXE),比对时要忽略大小写
+			if !strings.HasPrefix(strings.ToLower(line), `"`+strings.ToLower(name)+`"`) {
+				continue
+			}
+			f := strings.Split(line, `","`)
+			if len(f) < 2 {
+				continue
+			}
+			if pid, e := strconv.Atoi(strings.Trim(f[1], `",`)); e == nil {
+				res[pid] = true
+			}
+		}
+		return res
+	}
+
+	before := pidsByName("ping.exe")
+	// 三层进程:cmd → cmd → ping
+	cmd := exec.Command("cmd", "/c", "cmd", "/c", "ping", "-t", "127.0.0.1")
+	hideConsoleWindow(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Skipf("无法启动测试用父进程: %v", err)
+	}
+	defer killProcessTree(cmd)
+
+	child := 0
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		for pid := range pidsByName("ping.exe") {
+			if !before[pid] {
+				child = pid
+				break
+			}
+		}
+		if child != 0 {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if child == 0 {
+		t.Skip("子进程没起来,跳过")
+	}
+	t.Logf("进程树: cmd(%d) → cmd → ping(%d)", cmd.Process.Pid, child)
+
+	killProcessTree(cmd)
+
+	deadline = time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if !pidsByName("ping.exe")[child] {
+			t.Logf("✓ 最内层子进程已随父进程一并终止")
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Errorf("❌ 父进程已终止,但最内层子进程 pid=%d 仍在运行", child)
 }

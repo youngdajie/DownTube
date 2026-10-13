@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"os/exec"
+	"strconv"
 	"syscall"
 	"unsafe"
 )
@@ -58,6 +59,27 @@ func launchInstallerElevated(path string) error {
 // 这里挂上 Windows 的 CREATE_NO_WINDOW 语义（SysProcAttr.HideWindow）。
 func hideConsoleWindow(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+}
+
+// killProcessTree 终结 cmd 及其所有后代进程。
+//
+// 为什么不能只靠 exec.CommandContext:它只终止直接子进程。Windows 上父进程被杀后
+// 子进程会继续存活 —— yt-dlp 在分片下载(DASH/HLS)或合并时会拉起 ffmpeg,真正在下载的
+// 往往正是那个 ffmpeg。更糟的是它继承了 stdout/stderr 管道写端,父进程死了管道仍不 EOF,
+// cmd.Wait() 会一直阻塞,任务并发槽位再也释放不了,表现就是「清空队列后还在后台下载,
+// 直到关闭程序才停」。
+//
+// taskkill /T 的树终止同时解决两件事:杀掉子进程,以及让管道写端全部关闭。
+func killProcessTree(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	pid := cmd.Process.Pid
+	// 先尝试连树一起杀;失败(进程已退出/taskkill 不可用)再退回只杀父进程
+	if err := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F").Run(); err == nil {
+		return
+	}
+	_ = cmd.Process.Kill()
 }
 
 // acquireSingleInstance 通过命名互斥量保证同一时间只运行一个 DownTube 实例，

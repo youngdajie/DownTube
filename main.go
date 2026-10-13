@@ -1001,6 +1001,30 @@ type dlResult struct {
 	sawProgress bool
 }
 
+// watchCancel 让一个已启动的命令在 ctx 被取消时真正停下来,并给 Wait 加一道兜底。
+//
+// 返回的停止函数要在命令正常结束时调用,否则监听协程会一直挂着。
+// WaitDelay 是第二道保险:即便还有子进程赖着不走,最多等这么久 cmd.Wait 也会返回,
+// 避免并发槽位被永久占住(表现为清空队列后程序里仍有「运行中」的死任务)。
+func watchCancel(ctx context.Context, cmd *exec.Cmd) func() {
+	if cmd.WaitDelay == 0 {
+		cmd.WaitDelay = 15 * time.Second
+	}
+	if ctx == nil {
+		return func() {}
+	}
+	stop := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			killProcessTree(cmd)
+		case <-stop:
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { close(stop) }) }
+}
+
 // execDownload 运行一次 yt-dlp 下载并解析进度、标题与输出路径标记行。
 func (a *App) execDownload(ctx context.Context, id int, engine string, args []string, settings Settings) (dlResult, error) {
 	res := dlResult{}
@@ -1019,6 +1043,10 @@ func (a *App) execDownload(ctx context.Context, id int, engine string, args []st
 	if err := cmd.Start(); err != nil {
 		return res, err
 	}
+	// 用户暂停/清空队列时,要连 yt-dlp 拉起的子进程(分片下载与合并用的 ffmpeg)一起终结,
+	// 否则子进程会继续下载,并且因为持有管道写端让下面的 Wait 一直阻塞
+	stopWatch := watchCancel(ctx, cmd)
+	defer stopWatch()
 	stderrText := make(chan string, 1)
 	go func() {
 		b, _ := io.ReadAll(io.LimitReader(stderr, 1<<20))
@@ -1390,7 +1418,7 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 
 	// 3) 拼接视频片段并从源文件取整段音频
 	a.updateProgress(id, 99, "转码 H.265 中")
-	if jerr := concatWithSourceAudio(ffmpegPath, partsDir, encDir, len(segments), srcPath, tmpPath); jerr != nil {
+	if jerr := concatWithSourceAudio(ctx, ffmpegPath, partsDir, encDir, len(segments), srcPath, tmpPath); jerr != nil {
 		// 拼接环节失败(历史上有特殊字符目录导致路径被截断的情况):
 		// 清掉工作目录后整段重新转码一次,保证一定能产出成品
 		_ = os.RemoveAll(partsDir)
@@ -1418,7 +1446,7 @@ func (a *App) transcodeSegmented(ctx context.Context, id int, ffmpegPath, srcPat
 // 注意两点:列表文件必须放在无特殊字符的临时目录(ffmpeg 解析路径时不会把源目录名
 // 带入),条目一律使用绝对路径并转义单引号——工作目录名里出现 # 等字符时,
 // 相对路径会被 ffmpeg 当作 URL 锚点截断,导致永远找不到片段。
-func concatWithSourceAudio(ffmpegPath, partsDir, encDir string, count int, srcPath, outPath string) error {
+func concatWithSourceAudio(ctx context.Context, ffmpegPath, partsDir, encDir string, count int, srcPath, outPath string) error {
 	if count <= 0 {
 		return errors.New("没有可拼接的转码片段")
 	}
@@ -1438,7 +1466,7 @@ func concatWithSourceAudio(ffmpegPath, partsDir, encDir string, count int, srcPa
 	if err := os.WriteFile(listPath, []byte(list.String()), 0o644); err != nil {
 		return err
 	}
-	cmd := exec.Command(ffmpegPath,
+	cmd := exec.CommandContext(ctx, ffmpegPath,
 		"-y", "-hide_banner", "-loglevel", "error",
 		"-f", "concat", "-safe", "0", "-i", listPath,
 		"-i", srcPath,
@@ -1446,9 +1474,14 @@ func concatWithSourceAudio(ffmpegPath, partsDir, encDir string, count int, srcPa
 		"-c", "copy", "-tag:v", "hvc1", "-movflags", "+faststart",
 		outPath)
 	hideConsoleWindow(cmd)
+	// 收尾这一步原来不带 ctx,清空队列时 ffmpeg 会继续跑完;补上进程树终止
+	cmd.WaitDelay = 15 * time.Second
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return fmt.Errorf("拼接转码片段失败：%s", ffmpegErrText(err, stderrBuf.Bytes()))
 	}
 	return nil
@@ -1500,6 +1533,9 @@ func (a *App) encodeSegment(ctx context.Context, id int, ffmpegPath, srcPath str
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	// 暂停/清空时要终结整棵进程树,不能只等父进程退出
+	stopWatch := watchCancel(ctx, cmd)
+	defer stopWatch()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	for scanner.Scan() {
@@ -1594,6 +1630,9 @@ func (a *App) runTranscode(ctx context.Context, id int, ffmpegPath, srcPath, tmp
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	// 暂停/清空时要终结整棵进程树,不能只等父进程退出
+	stopWatch := watchCancel(ctx, cmd)
+	defer stopWatch()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 4096), 1<<20)
 	for scanner.Scan() {
