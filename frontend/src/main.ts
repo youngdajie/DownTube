@@ -190,6 +190,8 @@ interface AppState {
   toolboxProgress: number
   toolboxMessage: string
   toolboxResult: string
+  /** 上一次是用户主动取消的,用来给一句轻提示而不是错误 */
+  toolboxCanceled: boolean
 
   // —— 百宝箱:视频压缩(选项由后端下发,避免两边各写一份) ——
   toolboxCompressVideo: string
@@ -271,6 +273,7 @@ const state: AppState = {
   toolboxProgress: 0,
   toolboxMessage: '',
   toolboxResult: '',
+  toolboxCanceled: false,
   toolboxCompressVideo: '',
   toolboxCompressFormats: [],
   toolboxCompressQualities: [],
@@ -972,7 +975,10 @@ function renderToolboxFFmpeg() {
         <button class="btn btn-ghost btn-sm" id="tbCancel" ${state.toolboxBusy ? '' : 'disabled'}>取消</button>
       </div>
     </div>
-    ${state.toolboxResult ? `<p class="tb-result ${state.toolboxResult.startsWith('失败') ? 'error' : ''}">${safe(state.toolboxResult)}</p>` : ''}
+    ${state.toolboxResult || state.toolboxCanceled ? `<div class="tb-result-bar ${state.toolboxResult.startsWith('失败') ? 'error' : 'ok'}">
+      <span>${state.toolboxResult ? safe(state.toolboxResult) : '已取消'}</span>
+      <button class="tb-result-close" id="tbResultClose" title="关闭" aria-label="关闭">${icon('x', 14)}</button>
+    </div>` : ''}
     <p class="tb-note">${icon('folder', 13)}<span>输出文件夹<b>每次都会弹窗询问</b>，不自动保存，也不记住上次的位置</span></p>
   </div>`
 }
@@ -1370,6 +1376,11 @@ function bind() {
   $('#tbMerge')?.addEventListener('click', () => startToolboxTask('merge'))
   $('#tbSplit')?.addEventListener('click', () => startToolboxTask('split'))
   $('#tbCancel')?.addEventListener('click', cancelToolboxTask)
+  $('#tbResultClose')?.addEventListener('click', () => {
+    state.toolboxResult = ''
+    state.toolboxCanceled = false
+    render()
+  })
 
   // 百宝箱:视频压缩
   $('#tbPickCompress')?.addEventListener('click', pickToolboxCompressVideo)
@@ -2056,6 +2067,7 @@ async function startToolboxCompress() {
   state.toolboxBusy = true
   state.toolboxProgress = 0
   state.toolboxResult = ''
+  state.toolboxCanceled = false
   state.toolboxMessage = '正在准备压缩…'
   render()
   try {
@@ -2091,7 +2103,9 @@ async function startToolboxCompress() {
 function patchToolboxProgress() {
   const wrap = $('#tbProgressWrap')
   if (!wrap) { render(); return }
-  wrap.hidden = state.toolboxBusy || !!state.toolboxResult
+  // 与模板里的判断保持一致:忙碌中或有结果时**显示**。
+  // 这里原来写反了,导致任务一开始跑、第一个进度事件进来就把进度区藏起来
+  wrap.hidden = !(state.toolboxBusy || !!state.toolboxResult)
   const phase = $('#tbPhase')
   if (phase) phase.textContent = state.toolboxMessage || (state.toolboxBusy ? '处理中…' : '已完成')
   const percent = $('#tbPercent')
@@ -2266,8 +2280,17 @@ if (window.runtime?.EventsOn) {
   window.runtime.EventsOn('toolbox:finished', (data) => {
     if (!data) return
     state.toolboxBusy = false
-    state.toolboxProgress = data.ok ? 100 : state.toolboxProgress
     state.toolboxMessage = data.ok ? '完成' : ''
+    if (data.canceled) {
+      // 取消不是失败:把进度整个收掉,别留一个停在半途的进度条和一句「已取消」
+      state.toolboxProgress = 0
+      state.toolboxResult = ''
+      state.toolboxCanceled = true
+      if (state.page !== 'toolbox') return
+      render()
+      return
+    }
+    state.toolboxProgress = data.ok ? 100 : state.toolboxProgress
     state.toolboxResult = data.ok
       ? `已完成,输出目录:${data.output || ''}`
       : `${data.message || '处理失败'}`

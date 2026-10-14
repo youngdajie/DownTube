@@ -40,9 +40,10 @@ type ToolboxProgress struct {
 
 // ToolboxFinished 处理完成事件(对应前端 toolbox:finished)。
 type ToolboxFinished struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
-	Output  string `json:"output,omitempty"` // 成功时的输出目录
+	OK       bool   `json:"ok"`
+	Canceled bool   `json:"canceled,omitempty"` // 用户主动取消,不是失败
+	Message  string `json:"message"`
+	Output   string `json:"output,omitempty"` // 成功时的输出目录
 }
 
 // toolboxRunner 持有「当前是否有任务在跑」与取消钩子。
@@ -109,6 +110,12 @@ func (a *App) PickToolboxVideo() FilePickResult {
 	if derr != nil {
 		return FilePickResult{OK: false, Message: "无法读取该视频:" + derr.Error()}
 	}
+	// ffprobe 对「有文件但没有视频流」不报错,只会返回空编码器名。
+	// 这类文件(比如误选了一个纯音频)要在这里就拦下来,
+	// 否则会一路跑到 ffmpeg 才失败,报错还看不懂。
+	if codec == "" {
+		return FilePickResult{OK: false, Message: "这个文件里没有视频画面,请换一个"}
+	}
 	return FilePickResult{OK: true, Path: chosen, Version: codec}
 }
 
@@ -128,6 +135,9 @@ func (a *App) PickToolboxAudio() FilePickResult {
 	codec, derr := probeAudioCodec(a.ffmpegPathForToolbox(), chosen)
 	if derr != nil {
 		return FilePickResult{OK: false, Message: "无法读取该音频:" + derr.Error()}
+	}
+	if codec == "" {
+		return FilePickResult{OK: false, Message: "这个文件里没有声音,请换一个"}
 	}
 	return FilePickResult{OK: true, Path: chosen, Version: codec}
 }
@@ -168,7 +178,7 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 	go a.runToolboxFFmpeg(ctx, "merge", "正在合并视频与音频", []string{videoPath, audioPath}, outPath, func(args []string) []string {
 		a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", args[0], "-i", args[1]}
 		a = append(a, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy")
-		return append(a, "-movflags", "+faststart", args[2])
+		return append(a, mp4FaststartArgs(args[2])...)
 	})
 	return ToolboxStartResult{OK: true}
 }
@@ -254,7 +264,7 @@ func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inp
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			a.emitToolboxFinished(false, "已取消", "")
+			a.emitToolboxFinishedCanceled()
 			return
 		}
 		a.emitToolboxFinished(false, "处理失败:"+err.Error(), "")
@@ -278,7 +288,7 @@ func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOu
 	}
 	if _, err := a.execToolboxFFmpeg(ctx, ffmpegPath, videoArgs, total, func(percent float64) {
 		// 视频流占总进度的一半
-		a.emitToolboxProgress("split", percent/2, fmt.Sprintf("正在分离视频流 %d%%", int(percent)))
+		a.emitToolboxProgress("split", percent/2, fmt.Sprintf("正在分离视频流 %d%%", int(percent/2)))
 	}); err != nil {
 		a.finishSplitError(ctx, err)
 		return
@@ -291,7 +301,7 @@ func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOu
 		"-i", videoPath, "-map", "0:a:0", "-vn", "-c:a", "copy", audioOut,
 	}
 	if _, err := a.execToolboxFFmpeg(ctx, ffmpegPath, audioArgs, total, func(percent float64) {
-		a.emitToolboxProgress("split", 55+percent*0.45, fmt.Sprintf("正在分离音频流 %d%%", int(percent)))
+		a.emitToolboxProgress("split", 55+percent*0.45, fmt.Sprintf("正在分离音频流 %d%%", int(55+percent*0.45)))
 	}); err != nil {
 		a.finishSplitError(ctx, err)
 		return
@@ -303,7 +313,7 @@ func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOu
 
 func (a *App) finishSplitError(ctx context.Context, err error) {
 	if ctx.Err() != nil {
-		a.emitToolboxFinished(false, "已取消", "")
+		a.emitToolboxFinishedCanceled()
 		return
 	}
 	a.emitToolboxFinished(false, "处理失败:"+err.Error(), "")
@@ -352,10 +362,27 @@ func (a *App) execToolboxFFmpeg(ctx context.Context, ffmpegPath string, args []s
 	return "完成", nil
 }
 
+// mp4FaststartArgs 只给 mp4 输出加 +faststart —— 把索引挪到文件头部,便于边下边播。
+// mkv / webm 的封装器没有这个选项,加了虽然不报错(实测 ffmpeg 会静默忽略),
+// 但属于无意义参数,不如按容器判断。
+func mp4FaststartArgs(outPath string) []string {
+	if strings.EqualFold(filepath.Ext(outPath), ".mp4") {
+		return []string{"-movflags", "+faststart"}
+	}
+	return nil
+}
+
 // toolboxTotalDuration 合并任务的总时长按视频与音频里较长的那个算。
 func (a *App) toolboxTotalDuration(ffmpegPath, videoPath, audioPath string) float64 {
-	v, _ := probeDuration(ffmpegPath, videoPath)
-	a2, _ := probeDuration(ffmpegPath, audioPath)
+	// 压缩只有一个输入(第二路传空串),空路径要跳过 ——
+	// 否则每次压缩都会白跑一次 ffprobe("") 拿到 Invalid argument
+	var v, a2 float64
+	if videoPath != "" {
+		v, _ = probeDuration(ffmpegPath, videoPath)
+	}
+	if audioPath != "" {
+		a2, _ = probeDuration(ffmpegPath, audioPath)
+	}
 	return math.Max(v, a2)
 }
 
@@ -364,6 +391,15 @@ func (a *App) emitToolboxProgress(phase string, percent float64, message string)
 		return
 	}
 	runtime.EventsEmit(a.ctx, "toolbox:progress", ToolboxProgress{Phase: phase, Percent: percent, Message: message})
+}
+
+// emitToolboxFinishedCanceled 取消不是失败:单独一个标记,
+// 前端据此把进度区收掉,而不是停在中途显示一个「已取消」的红条。
+func (a *App) emitToolboxFinishedCanceled() {
+	if a.ctx == nil || a.disableEvents {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "toolbox:finished", ToolboxFinished{OK: false, Canceled: true, Message: "已取消"})
 }
 
 func (a *App) emitToolboxFinished(ok bool, message, output string) {
@@ -434,17 +470,25 @@ func splitVideoExt(videoCodec string) string {
 	}
 }
 
+// splitAudioExt 按音频编码器挑容器。**走流复制,容器装不下就必然失败。**
+//
+// mp3 单独一档:`.m4a` 会强制用 ipod 封装器,它不认 MP3,实测直接失败
+// (Tag mp4a incompatible with output codec id '86017',退出码 183),
+// 而且报错是封装器内部信息,用户完全看不懂。MP3 就用 .mp3。
 func splitAudioExt(codec string) string {
 	switch codec {
-	case "aac", "mp3":
+	case "aac":
 		return ".m4a"
+	case "mp3":
+		return ".mp3"
 	case "opus", "vorbis":
 		return ".ogg"
 	case "flac":
 		return ".flac"
-	case "alac", "pcm_s16le", "pcm_s24le":
+	case "alac", "pcm_s16le", "pcm_s24le", "pcm_s32le", "pcm_f32le", "pcm_u8":
 		return ".mka"
 	default:
+		// 不认识的编码器一律丢进 mkv 系的容器 —— 它最能装
 		return ".mka"
 	}
 }
@@ -587,8 +631,7 @@ func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResul
 		a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", args[0]}
 		a = append(a, videoArgs...)
 		a = append(a, audioArgs...)
-		a = append(a, "-movflags", "+faststart", args[2])
-		return a
+		return append(a, mp4FaststartArgs(args[2])...)
 	})
 	return ToolboxStartResult{OK: true}
 }

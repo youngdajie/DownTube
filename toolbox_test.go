@@ -74,19 +74,6 @@ func TestToolboxOutputContainers(t *testing.T) {
 	}
 }
 
-// TestToolboxAudioExt 音频扩展名必须与编码器对应。
-func TestToolboxAudioExt(t *testing.T) {
-	cases := map[string]string{
-		"aac": ".m4a", "mp3": ".m4a", "opus": ".ogg", "vorbis": ".ogg",
-		"flac": ".flac", "alac": ".mka", "pcm_s16le": ".mka", "": ".mka", "奇怪的编码": ".mka",
-	}
-	for codec, want := range cases {
-		if got := splitAudioExt(codec); got != want {
-			t.Errorf("splitAudioExt(%q) = %q, 期望 %q", codec, got, want)
-		}
-	}
-}
-
 // TestUniqueFilePathNeverOverwrites 输出文件已存在时必须换名,不能覆盖。
 func TestUniqueFilePathNeverOverwrites(t *testing.T) {
 	dir := t.TempDir()
@@ -415,4 +402,60 @@ func containsArg(args []string, flag, value string) bool {
 // 免得每次都要记得初始化 toolboxGPU 这个 map。
 func newTestApp() *App {
 	return &App{toolboxGPU: make(map[string]*hevcEncoderSpec)}
+}
+
+// ---------- 容器选择(踩过的坑) ----------
+
+// TestSplitAudioExt 音频扩展名必须与编码器对应。
+//
+// mp3 这一档是踩出来的:原来 mp3 归到 .m4a,而 .m4a 会强制走 ipod 封装器,
+// 它不认 MP3,分离一个 MP3 音轨的视频会直接失败(实测退出码 183):
+//
+//	[ipod @ ...] Tag mp4a incompatible with output codec id '86017'
+//
+// 报错是封装器内部信息,用户完全看不懂。
+//
+// ⚠️ 原来的 TestToolboxAudioExt 把 "mp3": ".m4a" 写成了期望值 ——
+// 期望值是照着实现抄的,等于把 bug 固化成了「正确行为」,所以一直没被发现。
+// 凡是按编码器挑容器的映射,**都要拿真实 ffmpeg 跑一遍再定期望值**。
+func TestSplitAudioExt(t *testing.T) {
+	cases := map[string]string{
+		"aac": ".m4a", "mp3": ".mp3", "opus": ".ogg", "vorbis": ".ogg",
+		"flac": ".flac", "alac": ".mka",
+		"pcm_s16le": ".mka", "pcm_s24le": ".mka", "pcm_s32le": ".mka", "pcm_f32le": ".mka", "pcm_u8": ".mka",
+		"": ".mka", "奇怪的编码": ".mka", // 兜底必须能装,别猜 mp4
+	}
+	for codec, want := range cases {
+		if got := splitAudioExt(codec); got != want {
+			t.Errorf("splitAudioExt(%q) = %q, 期望 %q", codec, got, want)
+		}
+	}
+}
+
+// TestMp4FaststartOnlyForMp4 +faststart 是 mp4 封装器的选项。
+// 实测 mkv/webm 加了不报错(ffmpeg 静默忽略),但属于无意义参数。
+func TestMp4FaststartOnlyForMp4(t *testing.T) {
+	for _, p := range []string{"a.mp4", "A.MP4"} {
+		if got := mp4FaststartArgs(p); len(got) != 2 || got[0] != "-movflags" {
+			t.Errorf("%s 应带 +faststart, 得到 %v", p, got)
+		}
+	}
+	// 上一版这里是硬编码的,分离与压缩都会无脑加上
+	for _, p := range []string{"a.mkv", "a.webm", "a.mka", "a.ogg"} {
+		if got := mp4FaststartArgs(p); len(got) != 0 {
+			t.Errorf("%s 不该带 +faststart, 得到 %v", p, got)
+		}
+	}
+}
+
+// TestToolboxTotalDurationSkipsEmptyInput 压缩任务只有一个输入(第二路是空串),
+// 空路径要跳过 —— 否则每次压缩都白跑一次 ffprobe(""),实测拿到 Invalid argument。
+func TestToolboxTotalDurationSkipsEmptyInput(t *testing.T) {
+	app := newTestApp()
+	if got := app.toolboxTotalDuration("Z:/不存在/ffmpeg.exe", "", ""); got != 0 {
+		t.Errorf("两个空输入应返回 0, 得到 %v", got)
+	}
+	if got := app.toolboxTotalDuration("Z:/不存在/ffmpeg.exe", "Z:/nope.mp4", ""); got != 0 {
+		t.Errorf("空音频路径应被跳过, 得到 %v", got)
+	}
 }

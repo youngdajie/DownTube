@@ -1211,8 +1211,6 @@ h1, h2, h3, p { margin: 0; }
 .tb-progress { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
 .tb-progress-bar { height: 100%; border-radius: 3px; background: var(--primary); transition: width .2s; }
 .tb-progress-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
-.tb-result { margin: 11px 0 0; font-size: 12px; line-height: 1.7; color: var(--primary); word-break: break-all; }
-.tb-result.error { color: #d64545; }
 
 /* 深色主题下的强调底色更沉一点 */
 [data-theme="dark"] .sites-best b { background: rgba(18, 150, 219, .18); }
@@ -1308,3 +1306,26 @@ h1, h2, h3, p { margin: 0; }
 /* 未选择时更淡,选好了才当正常内容看 */
 .tb-file-name.is-empty { color: var(--text-3); }
 .tb-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
+
+/* ============================================================ 百宝箱:结果条 */
+/* 原来的结果只是一行文字,关不掉 —— 跑完一次会一直挂在页面上。
+   现在做成一条可关闭的提示条 */
+.tb-result-bar {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 11px; padding: 9px 9px 9px 12px;
+  border-radius: 9px;
+  font-size: 12px; line-height: 1.6;
+}
+.tb-result-bar > span { flex: 1; min-width: 0; word-break: break-all; }
+.tb-result-bar.ok { background: var(--success-soft); color: var(--success); }
+.tb-result-bar.error { background: var(--danger-soft); color: var(--danger); }
+.tb-result-close {
+  flex: none; display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0;
+  border: none; border-radius: 6px;
+  background: transparent; color: inherit; opacity: .6;
+  cursor: pointer;
+  transition: opacity .18s ease, background-color .18s ease;
+}
+.tb-result-close:hover { opacity: 1; background: rgba(0, 0, 0, .07); }
+:root[data-theme="dark"] .tb-result-close:hover { background: rgba(255, 255, 255, .1); }
