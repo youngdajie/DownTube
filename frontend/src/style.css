@@ -1128,25 +1128,43 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* —— 推荐模块 —— */
-.tb-recommend { display: flex; flex-direction: column; gap: 12px; }
-.tb-recommend-body h3 { margin: 0 0 6px; font-size: 13.5px; font-weight: 600; }
-.tb-recommend-body p { margin: 0; font-size: 12.5px; line-height: 1.75; color: var(--text-2); }
-.tb-recommend-body p b { font-weight: 600; color: var(--text); }
-.tb-recommend-tip {
-  margin-top: 8px; padding: 7px 11px; border-radius: 7px;
+/* 一条推荐一块:名称/类型 → 说明 → 提示 → 来源与操作,四层各自有明确的样式。
+   多条之间用分隔线断开,不会再糊成一片 */
+.tb-rec-list { display: flex; flex-direction: column; }
+.tb-rec { padding: 13px 0; }
+.tb-rec + .tb-rec { border-top: 1px solid var(--border); }
+.tb-rec:first-child { padding-top: 2px; }
+.tb-rec:last-child { padding-bottom: 0; }
+
+.tb-rec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.tb-rec-head b { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.tb-rec-kind {
+  flex: none; font-size: 10.5px; line-height: 1;
+  padding: 3px 7px; border-radius: 4px;
+  background: var(--surface-3); color: var(--text-3);
+}
+.tb-rec-desc { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--text-2); }
+.tb-rec-tip {
+  margin: 8px 0 0; padding: 6px 10px;
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11.5px; line-height: 1.6;
+  border-radius: 6px;
   background: var(--primary-soft); color: var(--primary);
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
 }
-.tb-recommend-tip b { font-weight: 600; color: var(--primary); }
-.tb-recommend-tip svg { flex: none; }
-.tb-recommend-actions { display: flex; gap: 8px; }
-.tb-repo {
-  display: flex; align-items: center; gap: 7px; font-size: 11.5px;
-  color: var(--text-3); font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
-  padding: 7px 10px; border-radius: 7px; background: var(--surface-2);
-  word-break: break-all;
+.tb-rec-tip > span { flex: 1; }
+.tb-rec-tip svg { flex: none; margin-top: 2px; }
+
+.tb-rec-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 10px;
 }
-.tb-repo svg { flex: none; }
+.tb-rec-host {
+  display: flex; align-items: center; gap: 5px; min-width: 0;
+  font-size: 11px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tb-rec-host svg { flex: none; }
+.tb-rec-btns { display: flex; gap: 7px; flex: none; }
 
 /* —— FFmpeg 工具模块 —— */
 .tb-panel {
@@ -1155,26 +1173,27 @@ h1, h2, h3, p { margin: 0; }
 }
 .tb-panel + .tb-panel { margin-top: 10px; }
 .tb-panel-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
-.tb-panel-desc { margin: 5px 0 11px; font-size: 12px; line-height: 1.7; color: var(--text-3); }
-.tb-files { display: flex; flex-direction: column; gap: 7px; margin-bottom: 11px; }
-.tb-file { display: flex; align-items: center; gap: 9px; }
-.tb-file-tag {
-  flex: none; width: 34px; text-align: center; font-size: 11px;
-  padding: 2px 0; border-radius: 5px;
-  background: var(--surface-3); color: var(--text-2);
+/* 面板描述:标题下的说明。主句正常色,适用场景再淡一档,层次拉开 */
+.tb-panel-desc {
+  margin: 4px 0 11px;
+  font-size: 12px; line-height: 1.6; color: var(--text-2);
+  display: flex; flex-direction: column; gap: 2px;
 }
-.tb-file-name {
-  flex: 1; min-width: 0; font-size: 12px; color: var(--text-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.tb-panel-when { font-size: 11.5px; color: var(--text-3); }
+
+/* 注记:行为说明类文字。用左侧竖条 + 浅底把它和描述、控件区分开,
+   图标与文字分栏对齐,长句换行时不会顶到图标下面 */
+.tb-note {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin: 9px 0 0; padding: 8px 11px;
+  border-left: 2px solid var(--border-2);
+  border-radius: 0 6px 6px 0;
+  background: var(--surface-2);
+  font-size: 11.5px; line-height: 1.65; color: var(--text-3);
 }
-.tb-actions { display: flex; gap: 8px; }
-.tb-switch { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 12.5px; cursor: pointer; }
-.tb-hint {
-  margin: 7px 0 0; font-size: 11.5px; line-height: 1.7; color: var(--text-3);
-  display: flex; align-items: flex-start; gap: 5px;
-}
-.tb-hint svg { flex: none; margin-top: 3px; }
-.tb-hint b { font-weight: 600; color: var(--text-2); }
+.tb-note > span { flex: 1; }
+.tb-note svg { flex: none; margin-top: 2px; }
+.tb-note b { font-weight: 600; color: var(--text-2); }
 
 .tb-progress-wrap { margin-top: 13px; }
 .tb-progress-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 6px; color: var(--text-2); }
@@ -1183,17 +1202,10 @@ h1, h2, h3, p { margin: 0; }
 .tb-progress-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
 .tb-result { margin: 11px 0 0; font-size: 12px; line-height: 1.7; color: var(--primary); word-break: break-all; }
 .tb-result.error { color: #d64545; }
-.tb-outdir-note {
-  margin: 11px 0 0; font-size: 11.5px; color: var(--text-3);
-  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
-}
-.tb-outdir-note svg { flex: none; }
-.tb-outdir-note b { font-weight: 600; color: var(--text-2); }
 
 /* 深色主题下的强调底色更沉一点 */
 [data-theme="dark"] .sites-best b { background: rgba(18, 150, 219, .18); }
 [data-theme="dark"] .tb-card-icon { background: rgba(18, 150, 219, .18); }
-[data-theme="dark"] .tb-recommend-tip { background: rgba(18, 150, 219, .15); }
 
 /* ============================================================ 百宝箱:视频压缩 */
 .tb-compress-opts {
@@ -1214,31 +1226,41 @@ h1, h2, h3, p { margin: 0; }
 .tb-switch-inline { flex: none; padding-bottom: 7px; white-space: nowrap; }
 
 /* ============================================================ 侧边栏左下角装饰 */
-/* 半宽居中:上一版铺满整个左下角,面积太大且底部被裁掉一截。
-   现在缩到侧边栏的一半宽、水平居中,完整可见,只做点缀 */
+/* 一丛大小不一的胡萝卜安安静静待在左下角。绝对定位在容器底部排开,
+   各自大小/位置/倾斜都不同,避免看出是同一张图复制出来的 */
 .sidebar-mark {
-  flex: none; margin-top: auto;
-  display: flex; justify-content: center;
-  padding: 0 0 10px;
-  line-height: 0;
+  position: relative; flex: none; margin-top: auto;
+  height: 92px; overflow: visible;
   pointer-events: none;          /* 不拦截点击,导航区照常可用 */
 }
 .sidebar-mark img {
-  display: block; width: 50%; height: auto;
-  filter: blur(3px) saturate(.5);
-  opacity: .28;
-  transition: filter .45s ease, opacity .45s ease, transform .45s ease;
+  position: absolute; bottom: 0;
+  height: auto;
+  filter: blur(2.5px) saturate(.5);
+  opacity: .3;
+  transition: filter .45s ease, opacity .45s ease;
 }
+/* 五根:高的在后、矮的在前,稍微错开并各带一点倾斜 */
+.sidebar-mark .mark-1 { left:  6px;  width: 46px; bottom:  4px; transform: rotate(-11deg); opacity: .22; }
+.sidebar-mark .mark-2 { left: 34px;  width: 60px; bottom: -2px; transform: rotate(6deg);   opacity: .30; }
+.sidebar-mark .mark-3 { left: 68px;  width: 40px; bottom:  8px; transform: rotate(14deg);  opacity: .26; }
+.sidebar-mark .mark-4 { left: 96px;  width: 52px; bottom: -4px; transform: rotate(-5deg);  opacity: .32; }
+.sidebar-mark .mark-5 { left: 132px; width: 34px; bottom:  6px; transform: rotate(-18deg); opacity: .18; }
+
 .sidebar:hover .sidebar-mark img,
 .sidebar-mark:hover img {
   filter: blur(0) saturate(1);
   opacity: .78;
-  transform: scale(1.06);
 }
 .sidebar-mark img:hover { opacity: 1; }
-:root[data-theme="dark"] .sidebar-mark img { filter: blur(3px) saturate(.35) brightness(.75); opacity: .24; }
+:root[data-theme="dark"] .sidebar-mark img { filter: blur(2.5px) saturate(.35) brightness(.75); }
+:root[data-theme="dark"] .sidebar-mark .mark-1 { opacity: .18; }
+:root[data-theme="dark"] .sidebar-mark .mark-2 { opacity: .25; }
+:root[data-theme="dark"] .sidebar-mark .mark-3 { opacity: .21; }
+:root[data-theme="dark"] .sidebar-mark .mark-4 { opacity: .27; }
+:root[data-theme="dark"] .sidebar-mark .mark-5 { opacity: .15; }
 :root[data-theme="dark"] .sidebar:hover .sidebar-mark img,
-:root[data-theme="dark"] .sidebar-mark:hover img { filter: blur(0) saturate(.85) brightness(1); opacity: .75; }
+:root[data-theme="dark"] .sidebar-mark:hover img { filter: blur(0) saturate(.85) brightness(1); opacity: .74; }
 
 /* ============================================================ 百宝箱:开关与下拉 */
 /* 与设置页 .row-split 一致:文字在左、开关在右。两处开关都走这一条,别一个左一个右 */

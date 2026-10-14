@@ -400,7 +400,13 @@ function render() {
             <button class="nav-item ${state.page === 'toolbox' ? 'active' : ''}" data-page="toolbox">${icon('toolbox')}<span>百宝箱</span></button>
             <button class="nav-item ${state.page === 'about' ? 'active' : ''}" data-page="about">${icon('info')}<span>关于</span>${state.updateHas ? '<i class="nav-badge"></i>' : ''}</button>
           </nav>
-          <div class="sidebar-mark" aria-hidden="true"><img src="/downtube-mark.svg" alt="" /></div>
+          <div class="sidebar-mark" aria-hidden="true">
+            <img src="/downtube-mark.svg" alt="" class="mark-1" />
+            <img src="/downtube-mark.svg" alt="" class="mark-2" />
+            <img src="/downtube-mark.svg" alt="" class="mark-3" />
+            <img src="/downtube-mark.svg" alt="" class="mark-4" />
+            <img src="/downtube-mark.svg" alt="" class="mark-5" />
+          </div>
         </aside>
         <main class="main">
           <div class="content ${state.enterAnim ? 'page-enter' : ''}">
@@ -832,26 +838,57 @@ function renderUpdateBlock() {
 // 百宝箱:推荐工具 + FFmpeg 工具箱
 // ============================================================
 
-const TAMPERMONKEY_REPO = 'https://github.com/WhiteSevs/TamperMonkeyScript'
+// 推荐项。后续要加新推荐,往这个数组里加一项就行,渲染和事件都不用动。
+// url 必须带主机名,打开前会过一遍后端白名单校验。
+interface ToolboxRecommend {
+  id: string
+  name: string
+  kind: string        // 类型标签,如「浏览器脚本」
+  desc: string
+  tip?: string        // 一句加粗的提示,可选
+  url: string
+}
 
-/** 抖音网页端 Edge 插件推荐 */
+const TOOLBOX_RECOMMENDS: ToolboxRecommend[] = [
+  {
+    id: 'douyin',
+    name: '抖音增强',
+    kind: '浏览器脚本',
+    desc: '在抖音网页端直接下载视频，页面上的广告和干扰元素也会一并清掉',
+    tip: '下载抖音视频优先用它，比在下载队列里贴链接更稳，画质也更完整',
+    url: 'https://scriptcat.org/zh-CN/script-show-page/2534',
+  },
+]
+
+/** 从 URL 里取主机名,用于展示;取不到就原样返回 */
+function recommendHost(url: string) {
+  try { return new URL(url).hostname } catch { return url }
+}
+
+/** 推荐框:一条推荐一块,名称/类型/说明/提示/来源分层排开 */
 function renderToolboxRecommend() {
   return `<div class="tb-card">
     <div class="tb-card-head">
       <span class="tb-card-icon">${icon('shield', 18)}</span>
-      <div><h2>推荐</h2><span class="card-sub">抖音网页端更好用的办法</span></div>
+      <div><h2>推荐</h2><span class="card-sub">下载之外，这些也值得装</span></div>
     </div>
-    <div class="tb-recommend">
-      <div class="tb-recommend-body">
-        <h3>Tampermonkey 脚本 · Edge 插件</h3>
-        <p>给 Edge 装上油猴插件、导入这个脚本，抖音网页端就能<b>直接下载视频</b>，页面上的干扰元素也会一并清掉</p>
-        <p class="tb-recommend-tip">${icon('checkcircle', 14)}下载抖音视频优先用这个插件，比在下载队列里贴链接更稳，画质也更完整</p>
-      </div>
-      <div class="tb-recommend-actions">
-        <button class="btn btn-primary btn-sm" id="tbOpenRepo">${icon('external', 14)}打开仓库</button>
-        <button class="btn btn-ghost btn-sm" id="tbCopyRepo">${icon('clipboard', 14)}复制地址</button>
-      </div>
-      <div class="tb-repo">${icon('github', 14)}<span>${TAMPERMONKEY_REPO}</span></div>
+    <div class="tb-rec-list">
+      ${TOOLBOX_RECOMMENDS.map(rec => `
+      <article class="tb-rec">
+        <header class="tb-rec-head">
+          <b>${safe(rec.name)}</b>
+          <span class="tb-rec-kind">${safe(rec.kind)}</span>
+        </header>
+        <p class="tb-rec-desc">${safe(rec.desc)}</p>
+        ${rec.tip ? `<p class="tb-rec-tip">${icon('checkcircle', 13)}<span>${safe(rec.tip)}</span></p>` : ''}
+        <footer class="tb-rec-foot">
+          <span class="tb-rec-host">${icon('link', 12)}${safe(recommendHost(rec.url))}</span>
+          <span class="tb-rec-btns">
+            <button class="btn btn-primary btn-sm" data-rec-open="${safe(rec.id)}">${icon('external', 13)}打开</button>
+            <button class="btn btn-ghost btn-sm" data-rec-copy="${safe(rec.id)}">${icon('clipboard', 13)}复制地址</button>
+          </span>
+        </footer>
+      </article>`).join('')}
     </div>
   </div>`
 }
@@ -872,7 +909,7 @@ function renderToolboxFFmpeg() {
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('layers', 15)}视频音频合并</div>
-      <p class="tb-panel-desc">把外部音频合并进视频，替换原来的音轨。适合下载到无声视频、需要另外配一条音轨的情况</p>
+      <p class="tb-panel-desc">把外部音频合并进视频，替换原来的音轨<span class="tb-panel-when">适合下载到无声视频、需要另外配音轨的情况</span></p>
       <div class="tb-files">
         <div class="tb-file">
           <span class="tb-file-tag">视频</span>
@@ -892,16 +929,16 @@ function renderToolboxFFmpeg() {
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('undo', 15)}视频分离</div>
-      <p class="tb-panel-desc">把视频拆成独立的视频流和音频流两个文件。适合只想要其中一路，或者想自己重新拼一次的情况</p>
+      <p class="tb-panel-desc">把视频拆成视频流和音频流两个独立文件<span class="tb-panel-when">适合只想要其中一路，或者想自己重新拼一次的情况</span></p>
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbSplit" ${canStart ? '' : 'disabled'}>${icon('undo', 14)}开始分离</button>
       </div>
     </div>
-    <p class="tb-hint">${icon('info', 13)}两个操作都是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。想让文件变小请用下面的「视频压缩」</p>
+    <p class="tb-note">${icon('info', 13)}<span>两个操作都是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。想让文件变小请用下面的「视频压缩」</span></p>
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('package', 15)}视频压缩</div>
-      <p class="tb-panel-desc">重新编码视频,让文件变小。画质和体积由压缩率决定,输出格式可以自己选</p>
+      <p class="tb-panel-desc">重新编码视频，让文件变小<span class="tb-panel-when">画质和体积由压缩率决定，输出格式可以自己选</span></p>
       <div class="tb-file">
         <span class="tb-file-tag">视频</span>
         <span class="tb-file-name" id="tbCompressName">${state.toolboxCompressVideo ? safe(shortURL(state.toolboxCompressVideo)) : '未选择'}</span>
@@ -917,8 +954,8 @@ function renderToolboxFFmpeg() {
           ${selectControl('toolboxQuality', state.toolboxCompressQualities.map(q => ({ value: q.id, label: q.label })), state.toolboxCompressQuality, '压缩率')}
         </label>
       </div>
-      <p class="tb-hint" id="tbQualityNote" ${noteOfQuality(state.toolboxCompressQuality) ? '' : 'hidden'}>${safe(noteOfQuality(state.toolboxCompressQuality))}</p>
-      <p class="tb-hint">${icon('cpu', 13)}自动使用显卡编码器加速，未检测到可用显卡时回退 CPU</p>
+      <p class="tb-note" id="tbQualityNote" ${noteOfQuality(state.toolboxCompressQuality) ? '' : 'hidden'}>${icon('info', 13)}<span>${safe(noteOfQuality(state.toolboxCompressQuality))}</span></p>
+      <p class="tb-note">${icon('cpu', 13)}<span>自动使用显卡编码器加速，未检测到可用显卡时回退 CPU</span></p>
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbCompress" ${state.toolboxCompressVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('package', 14)}开始压缩</button>
       </div>
@@ -936,7 +973,7 @@ function renderToolboxFFmpeg() {
       </div>
     </div>
     ${state.toolboxResult ? `<p class="tb-result ${state.toolboxResult.startsWith('失败') ? 'error' : ''}">${safe(state.toolboxResult)}</p>` : ''}
-    <p class="tb-outdir-note">${icon('folder', 13)}输出文件夹<b>每次都会弹窗询问</b>，不自动保存，也不记住上次的位置</p>
+    <p class="tb-note">${icon('folder', 13)}<span>输出文件夹<b>每次都会弹窗询问</b>，不自动保存，也不记住上次的位置</span></p>
   </div>`
 }
 
@@ -1172,6 +1209,24 @@ root.addEventListener('click', event => {
   // 分站点 Cookies 导入/移除
   const cookieImport = (event.target as HTMLElement).closest<HTMLElement>('[data-cookie-import]')
   if (cookieImport) { importPlatformCookie(cookieImport.dataset.cookieImport!); return }
+  // 百宝箱:推荐的操作按钮(用委托,加新推荐不用动这里)
+  const recOpen = (event.target as HTMLElement).closest<HTMLElement>('[data-rec-open]')
+  if (recOpen) {
+    const rec = TOOLBOX_RECOMMENDS.find(r => r.id === recOpen.dataset.recOpen)
+    if (rec) backend()?.OpenExternalURL?.(rec.url)
+    return
+  }
+  const recCopy = (event.target as HTMLElement).closest<HTMLElement>('[data-rec-copy]')
+  if (recCopy) {
+    const rec = TOOLBOX_RECOMMENDS.find(r => r.id === recCopy.dataset.recCopy)
+    if (rec) {
+      window.runtime?.ClipboardSetText?.(rec.url)
+        .then(() => toast('地址已复制'))
+        .catch(() => toast('复制失败，请手动选中复制'))
+    }
+    return
+  }
+
   const cookieRemove = (event.target as HTMLElement).closest<HTMLElement>('[data-cookie-remove]')
   if (cookieRemove) { removePlatformCookie(cookieRemove.dataset.cookieRemove!); return }
   // 自定义下拉
@@ -1308,15 +1363,6 @@ function bind() {
   $('#linkCnb')?.addEventListener('click', () => backend()?.OpenCNBRepo?.())
   $('#linkBilibili')?.addEventListener('click', () => backend()?.OpenBilibili?.())
   $('#linkHomepage')?.addEventListener('click', () => backend()?.OpenHomepage?.())
-
-  // 百宝箱:推荐
-  $('#tbOpenRepo')?.addEventListener('click', () => backend()?.OpenExternalURL?.(TAMPERMONKEY_REPO))
-  $('#tbCopyRepo')?.addEventListener('click', async () => {
-    try {
-      await window.runtime?.ClipboardSetText?.(TAMPERMONKEY_REPO)
-      toast('仓库地址已复制')
-    } catch { toast('复制失败,请手动选中复制') }
-  })
 
   // 百宝箱:FFmpeg 工具
   $('#tbPickVideo')?.addEventListener('click', pickToolboxVideo)
