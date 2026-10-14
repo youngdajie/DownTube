@@ -347,7 +347,7 @@ func (a *App) CheckUpdate(current string) UpdateResult {
 		}
 		return updateResult(true, true, current, version, notes, downloadURL, pageURL, "github", "")
 	}
-	return updateResult(false, false, current, "", "", "", "", "", "检查更新失败:"+cnbErr)
+	return updateResult(false, false, current, "", "", "", "", "", "检查更新失败："+cnbErr)
 }
 
 // DownloadUpdate 下载安装包到临时目录,进度通过 update:progress 事件上报。
@@ -365,7 +365,7 @@ func (a *App) DownloadUpdate(rawURL, version string) UpdateDownloadResult {
 	a.mu.Lock()
 	if a.updateDownloading {
 		a.mu.Unlock()
-		return UpdateDownloadResult{OK: false, Error: "正在下载更新,请稍候"}
+		return UpdateDownloadResult{OK: false, Error: "正在下载更新，请稍候"}
 	}
 	a.updateDownloading = true
 	useProxy, proxyURL := a.store.Settings.UseProxy, a.store.Settings.ProxyURL
@@ -381,7 +381,7 @@ func (a *App) DownloadUpdate(rawURL, version string) UpdateDownloadResult {
 
 	targetDir := filepath.Join(os.TempDir(), updateTempDir)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return UpdateDownloadResult{OK: false, Error: "无法创建临时目录:" + err.Error()}
+		return UpdateDownloadResult{OK: false, Error: "无法创建临时目录：" + err.Error()}
 	}
 	dest := filepath.Join(targetDir, fmt.Sprintf(updateAssetName, version))
 
@@ -407,7 +407,7 @@ func (a *App) DownloadUpdate(rawURL, version string) UpdateDownloadResult {
 	var lastErr string
 	for i, source := range candidates {
 		if i > 0 {
-			a.emitUpdateProgress("download", 0, 0, "主源不可用,正在切换备用源…")
+			a.emitUpdateProgress("download", 0, 0, "主源不可用，正在切换备用源…")
 		}
 		_ = os.Remove(dest)
 		if err := a.downloadUpdateFile(source, dest, proxyForHost(source, proxyURL)); err != nil {
@@ -427,7 +427,7 @@ func (a *App) DownloadUpdate(rawURL, version string) UpdateDownloadResult {
 		return UpdateDownloadResult{OK: true, Path: dest, Size: size}
 	}
 	_ = os.Remove(dest)
-	return UpdateDownloadResult{OK: false, Error: "下载失败:" + lastErr + "(可稍后重试,或在设置中配置代理)"}
+	return UpdateDownloadResult{OK: false, Error: "下载失败：" + lastErr + "(可稍后重试，或在设置中配置代理)"}
 }
 
 // downloadUpdateFile 单文件下载,每 200ms 上报一次进度。
@@ -497,7 +497,7 @@ func validateInstallerFile(path string) error {
 		return errors.New("安装包不存在")
 	}
 	if info.Size() < 4<<20 {
-		return errors.New("安装包体积异常,可能未下载完整")
+		return errors.New("安装包体积异常，可能未下载完整")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -524,7 +524,7 @@ func (a *App) InstallUpdate(version string) UpdateInstallResult {
 	}
 	path := filepath.Join(os.TempDir(), updateTempDir, fmt.Sprintf(updateAssetName, version))
 	if err := validateInstallerFile(path); err != nil {
-		return UpdateInstallResult{OK: false, Error: "安装包已失效,请重新下载"}
+		return UpdateInstallResult{OK: false, Error: "安装包已失效，请重新下载"}
 	}
 	if err := launchInstallerElevated(path); err != nil {
 		return UpdateInstallResult{OK: false, Error: err.Error()}

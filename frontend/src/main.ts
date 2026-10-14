@@ -945,21 +945,25 @@ function toolboxDoneText(data: any) {
   const outSize = data?.outputSize || 0
   const dir = data?.output || ''
   const encoder = data?.encoder || ''
-  if (!inSize || !outSize) return `已完成,输出目录:${dir}`
+  if (!inSize || !outSize) return `已完成，输出目录：${dir}`
 
   const before = humanSize(inSize)
   const after = humanSize(outSize)
   const delta = Math.round((outSize - inSize) / inSize * 100)
-  const enc = encoder ? `(编码器:${encoder})` : ''
+  const enc = encoder ? `（编码器：${encoder}）` : ''
 
   if (outSize > inSize) {
     // 变大了:说清原因并给出可操作的建议。
     // 显卡编码是头号嫌疑 —— 同档位下它的产物明显大于 CPU。
-    return `压缩完成,但文件变大了:${before} → ${after}(+${delta}%)${enc}。` +
-      `常见原因是这个视频本身已经压得很小,或者用了显卡编码。` +
-      `想让它更小,把压缩率改成「小体积」再试一次。`
+    // 三句之间用换行分隔(样式里配 white-space: pre-line):
+    // 提示文案不留句号,但不能因此把句子黏成一条
+    return [
+      `压缩完成，但文件变大了：${before} → ${after}(+${delta}%)${enc}`,
+      '常见原因是这个视频本身已经压得很小，或者用了显卡编码',
+      '想让它更小，把压缩率改成「小体积」再试一次',
+    ].join('\n')
   }
-  return `已完成:${before} → ${after}(${delta === 0 ? '基本持平' : `减少 ${Math.abs(delta)}%`})${enc},输出目录:${dir}`
+  return `已完成：${before} → ${after}(${delta === 0 ? '基本持平' : `减少 ${Math.abs(delta)}%`})${enc}，输出目录：${dir}`
 }
 
 function toolboxTaskArea(phase: string) {
@@ -2112,7 +2116,7 @@ async function loadToolboxCompressOptions() {
     // 否则用户看到的是空下拉,而且此时任何 change 事件都会把状态写成空串
     if (state.page === 'toolbox') render()
   } catch {
-    if (state.page === 'toolbox') { toast('压缩选项加载失败,请重新进入本页'); render() }
+    if (state.page === 'toolbox') { toast('压缩选项加载失败，请重新进入本页'); render() }
   }
 }
 
@@ -2157,7 +2161,7 @@ async function startToolboxCompress() {
   const api = backend()
   if (!api) return
   if (!state.toolboxCompressVideo) { toast('请先选择要压缩的视频'); return }
-  if (!state.toolboxCompressFormats.length) { toast('压缩选项还没加载好,请稍候再试'); return }
+  if (!state.toolboxCompressFormats.length) { toast('压缩选项还没加载好，请稍候再试'); return }
   state.toolboxPhase = 'compress'
   state.toolboxBusy = true
   state.toolboxProgress = 0

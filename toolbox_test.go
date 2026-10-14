@@ -370,16 +370,33 @@ func TestToolboxCompressGPUProbeCache(t *testing.T) {
 	}
 }
 
-// TestCompressOutputName 输出名要能看出是压缩产物,且不带重复扩展名。
+// TestCompressOutputName 压缩产出的文件名。
+//
+// ⚠️ 这条抓过一个真 bug:compressOutputName 自己拼了一次扩展名(还把点去掉),
+// 调用点又拼一次,产出 `我的视频_压缩mp4.mp4` —— 名字里多一截、扩展名重复。
+// 断言最终**路径**,别只断言函数返回值,否则看不出拼接结果。
 func TestCompressOutputName(t *testing.T) {
-	if got := compressOutputName("D:/a/b/我的视频.mp4", ".mp4"); got != "我的视频_压缩.mp4" {
-		t.Errorf("compressOutputName = %q", got)
+	cases := []struct{ in, ext, want string }{
+		{"D:/a/b/我的视频.mp4", ".mp4", "我的视频_压缩.mp4"},
+		{"D:/a/b/我的视频.mkv", ".webm", "我的视频_压缩.webm"},
+		{"D:/a/b/无扩展名", ".mp4", "无扩展名_压缩.mp4"},
 	}
-	if got := compressOutputName("D:/a/b/我的视频.mkv", ".webm"); got != "我的视频_压缩.webm" {
-		t.Errorf("compressOutputName = %q", got)
+	for _, c := range cases {
+		got := compressOutputName(c.in) + c.ext
+		if got != c.want {
+			t.Errorf("最终文件名 = %q, 期望 %q", got, c.want)
+		}
+		// 扩展名只能出现一次
+		if strings.Count(got, ".") != 1 {
+			t.Errorf("%q 里的点应只有 1 个(扩展名前那个), 实际 %d 个", got, strings.Count(got, "."))
+		}
 	}
-	if got := compressOutputName("D:/a/b/无扩展名", ".mp4"); got != "无扩展名_压缩.mp4" {
-		t.Errorf("compressOutputName = %q", got)
+	// 合并与分离也是同一套拼接方式,一起守住
+	if got := mergeOutputName("D:/a/b/我的视频.mp4") + ".mp4"; got != "我的视频_合并.mp4" {
+		t.Errorf("合并最终文件名 = %q", got)
+	}
+	if got := splitOutputName("D:/a/b/我的视频.mp4", "视频") + ".mp4"; got != "我的视频_视频.mp4" {
+		t.Errorf("分离最终文件名 = %q", got)
 	}
 }
 

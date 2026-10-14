@@ -117,13 +117,13 @@ func (a *App) PickToolboxVideo() FilePickResult {
 	chosen = filepath.Clean(chosen)
 	codec, derr := probeVideoCodec(a.ffmpegPathForToolbox(), chosen)
 	if derr != nil {
-		return FilePickResult{OK: false, Message: "无法读取该视频:" + derr.Error()}
+		return FilePickResult{OK: false, Message: "无法读取该视频：" + derr.Error()}
 	}
 	// ffprobe 对「有文件但没有视频流」不报错,只会返回空编码器名。
 	// 这类文件(比如误选了一个纯音频)要在这里就拦下来,
 	// 否则会一路跑到 ffmpeg 才失败,报错还看不懂。
 	if codec == "" {
-		return FilePickResult{OK: false, Message: "这个文件里没有视频画面,请换一个"}
+		return FilePickResult{OK: false, Message: "这个文件里没有视频画面，请换一个"}
 	}
 	return FilePickResult{OK: true, Path: chosen, Version: codec}
 }
@@ -143,10 +143,10 @@ func (a *App) PickToolboxAudio() FilePickResult {
 	chosen = filepath.Clean(chosen)
 	codec, derr := probeAudioCodec(a.ffmpegPathForToolbox(), chosen)
 	if derr != nil {
-		return FilePickResult{OK: false, Message: "无法读取该音频:" + derr.Error()}
+		return FilePickResult{OK: false, Message: "无法读取该音频：" + derr.Error()}
 	}
 	if codec == "" {
-		return FilePickResult{OK: false, Message: "这个文件里没有声音,请换一个"}
+		return FilePickResult{OK: false, Message: "这个文件里没有声音，请换一个"}
 	}
 	return FilePickResult{OK: true, Path: chosen, Version: codec}
 }
@@ -159,7 +159,7 @@ func (a *App) PickToolboxAudio() FilePickResult {
 func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 	ffmpegPath := a.ffmpegPathForToolbox()
 	if ffmpegPath == "" {
-		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
+		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg，请先在「设置 → 视频设置」安装"}
 	}
 	if videoPath == "" || audioPath == "" {
 		return ToolboxStartResult{OK: false, Message: "请先选择视频文件与音频文件"}
@@ -182,7 +182,7 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 
 	ctx, ok := a.toolbox.begin()
 	if !ok {
-		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
+		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行，请先等它完成或取消"}
 	}
 	go a.runToolboxFFmpeg(ctx, "merge", "正在合并视频与音频", []string{videoPath, audioPath}, outPath,
 		buildMergeArgs(videoPath, audioPath, outPath), "")
@@ -193,7 +193,7 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 func (a *App) SplitVideoStream(videoPath string) ToolboxStartResult {
 	ffmpegPath := a.ffmpegPathForToolbox()
 	if ffmpegPath == "" {
-		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
+		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg，请先在「设置 → 视频设置」安装"}
 	}
 	if videoPath == "" {
 		return ToolboxStartResult{OK: false, Message: "请先选择视频文件"}
@@ -207,7 +207,7 @@ func (a *App) SplitVideoStream(videoPath string) ToolboxStartResult {
 
 	// 没有音轨就没必要拆音频,直接告诉用户,别产出一个空文件
 	if audioCodec == "" {
-		return ToolboxStartResult{OK: false, Message: "这个视频没有音轨,无需分离"}
+		return ToolboxStartResult{OK: false, Message: "这个视频没有音轨，无需分离"}
 	}
 
 	outDir, canceled := a.askToolboxOutputDir()
@@ -221,7 +221,7 @@ func (a *App) SplitVideoStream(videoPath string) ToolboxStartResult {
 
 	ctx, ok := a.toolbox.begin()
 	if !ok {
-		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
+		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行，请先等它完成或取消"}
 	}
 	go a.runSplitFFmpeg(ctx, ffmpegPath, videoPath, videoOut, audioOut, outDir)
 	return ToolboxStartResult{OK: true}
@@ -272,7 +272,7 @@ func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inp
 			a.emitToolboxFinishedCanceled()
 			return
 		}
-		a.emitToolboxFinished(false, "处理失败:"+err.Error(), "")
+		a.emitToolboxFinished(false, "处理失败："+err.Error(), "")
 		return
 	}
 	a.emitToolboxProgress(phase, 100, "完成")
@@ -346,7 +346,7 @@ func (a *App) finishSplitError(ctx context.Context, err error) {
 		a.emitToolboxFinishedCanceled()
 		return
 	}
-	a.emitToolboxFinished(false, "处理失败:"+err.Error(), "")
+	a.emitToolboxFinished(false, "处理失败："+err.Error(), "")
 }
 
 // execToolboxFFmpeg 执行一次 ffmpeg,按 onPercent 回调上报进度。
@@ -661,7 +661,7 @@ func toolboxCompressQuality(id string) ToolboxCompressQuality {
 func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResult {
 	ffmpegPath := a.ffmpegPathForToolbox()
 	if ffmpegPath == "" {
-		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg,请先在「设置 → 视频设置」安装"}
+		return ToolboxStartResult{OK: false, Message: "未检测到 FFmpeg，请先在「设置 → 视频设置」安装"}
 	}
 	if videoPath == "" {
 		return ToolboxStartResult{OK: false, Message: "请先选择要压缩的视频"}
@@ -680,11 +680,11 @@ func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResul
 	if canceled {
 		return ToolboxStartResult{Canceled: true}
 	}
-	outPath := uniqueFilePath(outDir, compressOutputName(videoPath, target.Ext), target.Ext)
+	outPath := uniqueFilePath(outDir, compressOutputName(videoPath), target.Ext)
 
 	ctx, ok := a.toolbox.begin()
 	if !ok {
-		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
+		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行，请先等它完成或取消"}
 	}
 	go a.runToolboxFFmpeg(ctx, "compress", "正在压缩视频", []string{videoPath, ""}, outPath,
 		buildCompressArgs(videoPath, outPath, videoArgs, audioArgs), encoderLabel)
@@ -756,7 +756,12 @@ func (a *App) resolveToolboxGPU(ffmpegPath, codec string) (hevcEncoderSpec, bool
 }
 
 // compressOutputName 输出名带上目标格式,方便区分「这是压缩出来的」。
-func compressOutputName(videoPath, ext string) string {
+// compressOutputName 只给文件名主体,扩展名由调用点通过 uniqueFilePath 拼上 ——
+// 和 mergeOutputName / splitOutputName 保持一致。
+//
+// 之前它自己也拼了一次扩展名(还顺手把点去掉了),调用点又拼一次,
+// 于是产出 `我的视频_压缩mp4.mp4`:名字里多一截,扩展名还重复。
+func compressOutputName(videoPath string) string {
 	base := strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath))
-	return base + "_压缩" + strings.TrimPrefix(ext, ".")
+	return base + "_压缩"
 }

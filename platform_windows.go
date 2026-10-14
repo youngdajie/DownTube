@@ -49,7 +49,7 @@ func launchInstallerElevated(path string) error {
 		swShowNormal,
 	)
 	if ret <= shellExecError {
-		return errors.New("启动安装程序失败,可能取消了管理员授权")
+		return errors.New("启动安装程序失败，可能取消了管理员授权")
 	}
 	return nil
 }
