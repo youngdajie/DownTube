@@ -1128,50 +1128,61 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* —— 推荐模块 —— */
-/* 一条推荐一块:名称/类型 → 说明 → 提示 → 来源与操作,四层各自有明确的样式。
-   多条之间用分隔线断开,不会再糊成一片 */
-.tb-rec-list { display: flex; flex-direction: column; }
-.tb-rec { padding: 13px 0; }
-.tb-rec + .tb-rec { border-top: 1px solid var(--border); }
-.tb-rec:first-child { padding-top: 2px; }
-.tb-rec:last-child { padding-bottom: 0; }
+/* 一条推荐一张卡,沿用程序里 .card 的尺寸语言(1px 细边、12px 圆角、白底)
+   蓝色操作条把「提示 + 两个按钮」收在一处,是这个卡片的视觉落点 */
+.tb-rec-list { display: flex; flex-direction: column; gap: 11px; }
 
-.tb-rec-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-.tb-rec-head b { font-size: 13.5px; font-weight: 600; color: var(--text); }
-.tb-rec-kind {
-  flex: none; font-size: 10.5px; line-height: 1;
-  padding: 3px 7px; border-radius: 4px;
-  background: var(--surface-3); color: var(--text-3);
+.tb-rec {
+  padding: 14px 15px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color .2s ease;
 }
-.tb-rec-desc { margin: 0; font-size: 12.5px; line-height: 1.7; color: var(--text-2); }
-.tb-rec-tip {
-  margin: 8px 0 0; padding: 6px 10px;
-  display: flex; align-items: flex-start; gap: 6px;
-  font-size: 11.5px; line-height: 1.6;
-  border-radius: 6px;
+.tb-rec:hover { border-color: var(--border-2); }
+
+.tb-rec-top { display: flex; align-items: center; gap: 9px; }
+.tb-rec-name { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
+.tb-rec-kind {
+  flex: none; padding: 3.5px 9px;
+  font-size: 10.5px; line-height: 1; font-weight: 500;
+  border-radius: 999px;                 /* 胶囊形,比圆角矩形更轻快 */
   background: var(--primary-soft); color: var(--primary);
 }
-.tb-rec-tip > span { flex: 1; }
-.tb-rec-tip svg { flex: none; margin-top: 2px; }
-
-.tb-rec-foot {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 10px; margin-top: 10px;
-}
 .tb-rec-host {
-  display: flex; align-items: center; gap: 5px; min-width: 0;
+  margin-left: auto; display: flex; align-items: center; gap: 4px;
   font-size: 11px; color: var(--text-3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .tb-rec-host svg { flex: none; }
-.tb-rec-btns { display: flex; gap: 7px; flex: none; }
+
+.tb-rec-desc { margin: 8px 0 0; font-size: 12.5px; line-height: 1.7; color: var(--text-2); }
+
+/* 蓝色操作条。空间够时提示与按钮同一行,窄了自动换行 */
+.tb-rec-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin-top: 11px; padding: 8px 9px 8px 12px;
+  border-radius: 9px;
+  background: var(--primary-soft);
+}
+.tb-rec-bar-text {
+  flex: 1; min-width: 190px;
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 11.5px; line-height: 1.6; color: var(--text-2);
+}
+.tb-rec-bar-text > span { flex: 1; }
+.tb-rec-bar-text svg { flex: none; margin-top: 2px; color: var(--primary); }
+.tb-rec-bar-actions { flex: none; display: flex; gap: 7px; margin-left: auto; }
 
 /* —— FFmpeg 工具模块 —— */
-.tb-panel {
-  padding: 13px 14px; border-radius: 9px;
-  background: var(--surface-2); border: 1px solid var(--border);
+/* 面板是卡片里的一个分节,不再自己套一层框 —— 卡片里套方框会显得很闷。
+   分节之间用一条细线断开,和设置页的 .divider 是同一套做法 */
+.tb-panel { padding: 0; border: none; background: none; border-radius: 0; }
+/* 用 :not(:first-of-type) 而不是相邻选择器 —— 卡片里还有 .tb-note 之类的
+   非面板元素夹在中间,「+」会漏掉它们后面的那一节 */
+.tb-panel:not(:first-of-type) {
+  margin-top: 20px; padding-top: 20px;
+  border-top: 1px solid var(--border);
 }
-.tb-panel + .tb-panel { margin-top: 10px; }
 .tb-panel-title { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
 /* 面板描述:标题下的说明。主句正常色,适用场景再淡一档,层次拉开 */
 .tb-panel-desc {
@@ -1223,7 +1234,6 @@ h1, h2, h3, p { margin: 0; }
 .tb-field select:hover { border-color: var(--border-2); }
 .tb-field select:focus { outline: none; border-color: var(--primary); }
 .tb-field select:disabled { opacity: .55; cursor: not-allowed; }
-.tb-switch-inline { flex: none; padding-bottom: 7px; white-space: nowrap; }
 
 /* ============================================================ 侧边栏左下角装饰 */
 /* 一丛大小不一的胡萝卜安安静静待在左下角。绝对定位在容器底部排开,
@@ -1231,10 +1241,11 @@ h1, h2, h3, p { margin: 0; }
 .sidebar-mark {
   position: relative; flex: none; margin-top: auto;
   height: 92px; overflow: visible;
-  pointer-events: none;          /* 不拦截点击,导航区照常可用 */
+  pointer-events: none;          /* 容器不拦截点击,只让图片本身可悬停 */
 }
 .sidebar-mark img {
   position: absolute; bottom: 0;
+  pointer-events: auto;          /* 只有移到胡萝卜上才触发显现 */
   height: auto;
   filter: blur(2.5px) saturate(.5);
   opacity: .3;
@@ -1247,8 +1258,9 @@ h1, h2, h3, p { margin: 0; }
 .sidebar-mark .mark-4 { left: 96px;  width: 52px; bottom: -4px; transform: rotate(-5deg);  opacity: .32; }
 .sidebar-mark .mark-5 { left: 132px; width: 34px; bottom:  6px; transform: rotate(-18deg); opacity: .18; }
 
-.sidebar:hover .sidebar-mark img,
-.sidebar-mark:hover img {
+/* 悬停任意一根 → 整丛一起显形;:has 不支持时至少悬停的那根会亮 */
+.sidebar-mark img:hover,
+.sidebar-mark:has(img:hover) img {
   filter: blur(0) saturate(1);
   opacity: .78;
 }
@@ -1259,14 +1271,40 @@ h1, h2, h3, p { margin: 0; }
 :root[data-theme="dark"] .sidebar-mark .mark-3 { opacity: .21; }
 :root[data-theme="dark"] .sidebar-mark .mark-4 { opacity: .27; }
 :root[data-theme="dark"] .sidebar-mark .mark-5 { opacity: .15; }
-:root[data-theme="dark"] .sidebar:hover .sidebar-mark img,
-:root[data-theme="dark"] .sidebar-mark:hover img { filter: blur(0) saturate(.85) brightness(1); opacity: .74; }
+:root[data-theme="dark"] .sidebar-mark img:hover,
+:root[data-theme="dark"] .sidebar-mark:has(img:hover) img { filter: blur(0) saturate(.85) brightness(1); opacity: .74; }
 
-/* ============================================================ 百宝箱:开关与下拉 */
+/* ============================================================ 百宝箱:下拉 */
 /* 与设置页 .row-split 一致:文字在左、开关在右。两处开关都走这一条,别一个左一个右 */
-.tb-switch { flex-direction: row-reverse; align-items: center; gap: 10px; }
-.tb-switch .switch { flex: none; }
-.tb-switch-inline { flex-direction: row-reverse; }
 .tb-field .md-select { width: 100%; }
 /* 下拉菜单要能溢出面板,面板本身不能裁掉它 */
 .tb-panel { overflow: visible; }
+
+/* ============================================================ 百宝箱:文件槽位 */
+/* 原来 .tb-file 系列没有任何样式,就是「文字 + 按钮」裸着排一行,
+   这是百宝箱看起来最旧的地方。改成浅底圆角的槽位 */
+.tb-files { display: flex; flex-direction: column; gap: 7px; margin: 12px 0 0; }
+.tb-file {
+  display: flex; align-items: center; gap: 9px;
+  min-height: 40px; padding: 4px 5px 4px 11px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  transition: background-color .2s ease;
+}
+.tb-file:hover { background: var(--surface-3); }
+.tb-file-tag {
+  flex: none; padding: 3.5px 9px;
+  font-size: 10.5px; line-height: 1; font-weight: 500;
+  border-radius: 999px;
+  background: var(--surface); color: var(--text-2);   /* 用白底而不是更浅的灰,才看得出是个标签 */
+  border: 1px solid var(--border);
+}
+.tb-file:hover .tb-file-tag { border-color: var(--border-2); }
+.tb-file-name {
+  flex: 1; min-width: 0;
+  font-size: 12.5px; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 未选择时更淡,选好了才当正常内容看 */
+.tb-file-name.is-empty { color: var(--text-3); }
+.tb-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }

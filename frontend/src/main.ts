@@ -865,7 +865,7 @@ function recommendHost(url: string) {
   try { return new URL(url).hostname } catch { return url }
 }
 
-/** 推荐框:一条推荐一块,名称/类型/说明/提示/来源分层排开 */
+/** 推荐框:一条推荐一张卡,和程序里其它卡片同一套语言 */
 function renderToolboxRecommend() {
   return `<div class="tb-card">
     <div class="tb-card-head">
@@ -875,19 +875,19 @@ function renderToolboxRecommend() {
     <div class="tb-rec-list">
       ${TOOLBOX_RECOMMENDS.map(rec => `
       <article class="tb-rec">
-        <header class="tb-rec-head">
-          <b>${safe(rec.name)}</b>
+        <div class="tb-rec-top">
+          <b class="tb-rec-name">${safe(rec.name)}</b>
           <span class="tb-rec-kind">${safe(rec.kind)}</span>
-        </header>
-        <p class="tb-rec-desc">${safe(rec.desc)}</p>
-        ${rec.tip ? `<p class="tb-rec-tip">${icon('checkcircle', 13)}<span>${safe(rec.tip)}</span></p>` : ''}
-        <footer class="tb-rec-foot">
           <span class="tb-rec-host">${icon('link', 12)}${safe(recommendHost(rec.url))}</span>
-          <span class="tb-rec-btns">
-            <button class="btn btn-primary btn-sm" data-rec-open="${safe(rec.id)}">${icon('external', 13)}打开</button>
+        </div>
+        <p class="tb-rec-desc">${safe(rec.desc)}</p>
+        <div class="tb-rec-bar">
+          ${rec.tip ? `<span class="tb-rec-bar-text">${icon('checkcircle', 13)}<span>${safe(rec.tip)}</span></span>` : '<span class="tb-rec-bar-text"></span>'}
+          <span class="tb-rec-bar-actions">
+            <button class="btn btn-primary btn-sm" data-rec-open="${safe(rec.id)}">${icon('external', 13)}打开链接</button>
             <button class="btn btn-ghost btn-sm" data-rec-copy="${safe(rec.id)}">${icon('clipboard', 13)}复制地址</button>
           </span>
-        </footer>
+        </div>
       </article>`).join('')}
     </div>
   </div>`
@@ -913,12 +913,12 @@ function renderToolboxFFmpeg() {
       <div class="tb-files">
         <div class="tb-file">
           <span class="tb-file-tag">视频</span>
-          <span class="tb-file-name" id="tbVideoName">${state.toolboxVideo ? safe(shortURL(state.toolboxVideo)) : '未选择'}</span>
+          <span class="tb-file-name ${state.toolboxVideo ? '' : 'is-empty'}" id="tbVideoName">${state.toolboxVideo ? safe(shortURL(state.toolboxVideo)) : '未选择'}</span>
           <button class="btn btn-ghost btn-sm" id="tbPickVideo" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
         </div>
         <div class="tb-file">
           <span class="tb-file-tag">音频</span>
-          <span class="tb-file-name" id="tbAudioName">${state.toolboxAudio ? safe(shortURL(state.toolboxAudio)) : '未选择'}</span>
+          <span class="tb-file-name ${state.toolboxAudio ? '' : 'is-empty'}" id="tbAudioName">${state.toolboxAudio ? safe(shortURL(state.toolboxAudio)) : '未选择'}</span>
           <button class="btn btn-ghost btn-sm" id="tbPickAudio" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
         </div>
       </div>
@@ -941,7 +941,7 @@ function renderToolboxFFmpeg() {
       <p class="tb-panel-desc">重新编码视频，让文件变小<span class="tb-panel-when">画质和体积由压缩率决定，输出格式可以自己选</span></p>
       <div class="tb-file">
         <span class="tb-file-tag">视频</span>
-        <span class="tb-file-name" id="tbCompressName">${state.toolboxCompressVideo ? safe(shortURL(state.toolboxCompressVideo)) : '未选择'}</span>
+        <span class="tb-file-name ${state.toolboxCompressVideo ? '' : 'is-empty'}" id="tbCompressName">${state.toolboxCompressVideo ? safe(shortURL(state.toolboxCompressVideo)) : '未选择'}</span>
         <button class="btn btn-ghost btn-sm" id="tbPickCompress" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
       </div>
       <div class="tb-compress-opts">
