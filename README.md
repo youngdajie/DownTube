@@ -68,7 +68,7 @@ wails build -nsis -clean -platform windows/amd64
 1. 改 `wails.json` 的 `info.productVersion`（顺手同步 `frontend/package.json` 的 `version`）
 2. 版本说明写进 `docs/releases/<版本号>.md`（Release 页的正文就是它，不写就退回 tag 附注）
 3. 提交并推送到 GitHub 与 CNB
-4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.3.4 -m "1.3.1" && git push origin refs/tags/V1.3.4 && git push github refs/tags/V1.3.4`
+4. 推标签（两个平台各自触发自动发版）：`git tag -a V1.3.5 -m "1.3.1" && git push origin refs/tags/V1.3.5 && git push github refs/tags/V1.3.5`
 
 标签格式必须是 `V` + `wails.json` 里的版本号，对不上流水线会直接红掉 ——
 这样就不会出现「安装包是 0.2.0、Release 却挂在 V0.3.0 上」的情况。
