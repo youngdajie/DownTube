@@ -181,12 +181,9 @@ interface AppState {
   updateError: string
 
   // —— 百宝箱:FFmpeg 工具 ——
-  toolboxVideo: string
-  toolboxVideoInfo: string
-  toolboxAudio: string
-  toolboxAudioInfo: string
+  toolboxMergeVideo: string
+  toolboxMergeAudio: string
   toolboxBusy: boolean
-  toolboxPhase: string
   toolboxProgress: number
   toolboxMessage: string
   toolboxResult: string
@@ -195,6 +192,11 @@ interface AppState {
 
   // —— 百宝箱:视频压缩(选项由后端下发,避免两边各写一份) ——
   toolboxCompressVideo: string
+  /** 分离有自己的一份输入 —— 和合并共用会让用户不知道分离的是哪个文件 */
+  toolboxSplitVideo: string
+  /** 当前(或最近一次)任务属于哪个面板:merge / split / compress。
+      进度与结果都渲染在它对应的面板里,不让用户去卡片底部找 */
+  toolboxPhase: string
   toolboxCompressFormats: Array<{ id: string; label: string; ext: string }>
   toolboxCompressQualities: Array<{ id: string; label: string; note: string }>
   toolboxCompressFormat: string
@@ -264,17 +266,16 @@ const state: AppState = {
   updateError: '',
 
   /* 百宝箱:FFmpeg 工具 */
-  toolboxVideo: '',
-  toolboxVideoInfo: '',
-  toolboxAudio: '',
-  toolboxAudioInfo: '',
+  toolboxMergeVideo: '',
+  toolboxMergeAudio: '',
   toolboxBusy: false,
-  toolboxPhase: '',
   toolboxProgress: 0,
   toolboxMessage: '',
   toolboxResult: '',
   toolboxCanceled: false,
   toolboxCompressVideo: '',
+  toolboxSplitVideo: '',
+  toolboxPhase: '',
   toolboxCompressFormats: [],
   toolboxCompressQualities: [],
   toolboxCompressFormat: 'mp4-h265',
@@ -902,8 +903,31 @@ function noteOfQuality(id: string) {
   return state.toolboxCompressQualities.find(q => q.id === id)?.note || ''
 }
 
+/** 任务区:进度与结果渲染在**正在跑的那个面板**里。
+    原来它们统一放在卡片最下方,用户在压缩面板点完开始,得往下滚才看得到进度。 */
+function toolboxTaskArea(phase: string) {
+  if (state.toolboxPhase !== phase) return ''
+  const showProgress = state.toolboxBusy || !!state.toolboxResult
+  const result = state.toolboxResult || state.toolboxCanceled
+  return `
+    <div class="tb-progress-wrap" id="tbProgressWrap" ${showProgress ? '' : 'hidden'}>
+      <div class="tb-progress-head">
+        <span id="tbPhase">${safe(state.toolboxMessage || (state.toolboxBusy ? '处理中…' : '已完成'))}</span>
+        <span id="tbPercent">${Math.round(state.toolboxProgress)}%</span>
+      </div>
+      <div class="tb-progress"><div class="tb-progress-bar" id="tbProgressBar" style="width:${Math.round(state.toolboxProgress)}%"></div></div>
+      <div class="tb-progress-actions">
+        <button class="btn btn-ghost btn-sm" id="tbCancel" ${state.toolboxBusy ? '' : 'disabled'}>取消</button>
+      </div>
+    </div>
+    ${result ? `<div class="tb-result-bar ${state.toolboxResult.startsWith('失败') ? 'error' : 'ok'}">
+      <span>${state.toolboxResult ? safe(state.toolboxResult) : '已取消'}</span>
+      <button class="tb-result-close" id="tbResultClose" title="关闭" aria-label="关闭">${icon('x', 14)}</button>
+    </div>` : ''}`
+}
+
 function renderToolboxFFmpeg() {
-  const canStart = !!state.toolboxVideo && !state.toolboxBusy
+  const canStart = !!state.toolboxMergeVideo && !state.toolboxBusy
   return `<div class="tb-card">
     <div class="tb-card-head">
       <span class="tb-card-icon">${icon('sliders', 18)}</span>
@@ -916,26 +940,33 @@ function renderToolboxFFmpeg() {
       <div class="tb-files">
         <div class="tb-file">
           <span class="tb-file-tag">视频</span>
-          <span class="tb-file-name ${state.toolboxVideo ? '' : 'is-empty'}" id="tbVideoName">${state.toolboxVideo ? safe(shortURL(state.toolboxVideo)) : '未选择'}</span>
+          <span class="tb-file-name ${state.toolboxMergeVideo ? '' : 'is-empty'}" id="tbVideoName">${state.toolboxMergeVideo ? safe(shortURL(state.toolboxMergeVideo)) : '未选择'}</span>
           <button class="btn btn-ghost btn-sm" id="tbPickVideo" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
         </div>
         <div class="tb-file">
           <span class="tb-file-tag">音频</span>
-          <span class="tb-file-name ${state.toolboxAudio ? '' : 'is-empty'}" id="tbAudioName">${state.toolboxAudio ? safe(shortURL(state.toolboxAudio)) : '未选择'}</span>
+          <span class="tb-file-name ${state.toolboxMergeAudio ? '' : 'is-empty'}" id="tbAudioName">${state.toolboxMergeAudio ? safe(shortURL(state.toolboxMergeAudio)) : '未选择'}</span>
           <button class="btn btn-ghost btn-sm" id="tbPickAudio" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
         </div>
       </div>
       <div class="tb-actions">
-        <button class="btn btn-primary btn-sm" id="tbMerge" ${canStart && state.toolboxAudio ? '' : 'disabled'}>${icon('layers', 14)}开始合并</button>
+        <button class="btn btn-primary btn-sm" id="tbMerge" ${canStart && state.toolboxMergeAudio ? '' : 'disabled'}>${icon('layers', 14)}开始合并</button>
       </div>
+      ${toolboxTaskArea('merge')}
     </div>
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('undo', 15)}视频分离</div>
       <p class="tb-panel-desc">把视频拆成视频流和音频流两个独立文件<span class="tb-panel-when">适合只想要其中一路，或者想自己重新拼一次的情况</span></p>
-      <div class="tb-actions">
-        <button class="btn btn-primary btn-sm" id="tbSplit" ${canStart ? '' : 'disabled'}>${icon('undo', 14)}开始分离</button>
+      <div class="tb-file">
+        <span class="tb-file-tag">视频</span>
+        <span class="tb-file-name ${state.toolboxSplitVideo ? '' : 'is-empty'}" id="tbSplitName">${state.toolboxSplitVideo ? safe(shortURL(state.toolboxSplitVideo)) : '未选择'}</span>
+        <button class="btn btn-ghost btn-sm" id="tbPickSplit" ${state.toolboxBusy ? 'disabled' : ''}>选择</button>
       </div>
+      <div class="tb-actions">
+        <button class="btn btn-primary btn-sm" id="tbSplit" ${state.toolboxSplitVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('undo', 14)}开始分离</button>
+      </div>
+      ${toolboxTaskArea('split')}
     </div>
     <p class="tb-note">${icon('info', 13)}<span>两个操作都是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。想让文件变小请用下面的「视频压缩」</span></p>
 
@@ -962,23 +993,10 @@ function renderToolboxFFmpeg() {
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbCompress" ${state.toolboxCompressVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('package', 14)}开始压缩</button>
       </div>
+      ${toolboxTaskArea('compress')}
     </div>
 
 
-    <div class="tb-progress-wrap" id="tbProgressWrap" ${state.toolboxBusy || state.toolboxResult ? '' : 'hidden'}>
-      <div class="tb-progress-head">
-        <span id="tbPhase">${safe(state.toolboxMessage || (state.toolboxBusy ? '处理中…' : '已完成'))}</span>
-        <span id="tbPercent">${Math.round(state.toolboxProgress)}%</span>
-      </div>
-      <div class="tb-progress"><div class="tb-progress-bar" id="tbProgressBar" style="width:${Math.round(state.toolboxProgress)}%"></div></div>
-      <div class="tb-progress-actions">
-        <button class="btn btn-ghost btn-sm" id="tbCancel" ${state.toolboxBusy ? '' : 'disabled'}>取消</button>
-      </div>
-    </div>
-    ${state.toolboxResult || state.toolboxCanceled ? `<div class="tb-result-bar ${state.toolboxResult.startsWith('失败') ? 'error' : 'ok'}">
-      <span>${state.toolboxResult ? safe(state.toolboxResult) : '已取消'}</span>
-      <button class="tb-result-close" id="tbResultClose" title="关闭" aria-label="关闭">${icon('x', 14)}</button>
-    </div>` : ''}
     <p class="tb-note">${icon('folder', 13)}<span>输出文件夹<b>每次都会弹窗询问</b>，不自动保存，也不记住上次的位置</span></p>
   </div>`
 }
@@ -1383,6 +1401,7 @@ function bind() {
   })
 
   // 百宝箱:视频压缩
+  $('#tbPickSplit')?.addEventListener('click', pickToolboxSplitVideo)
   $('#tbPickCompress')?.addEventListener('click', pickToolboxCompressVideo)
   $('#tbCompress')?.addEventListener('click', startToolboxCompress)
 
@@ -1940,8 +1959,7 @@ async function pickToolboxVideo() {
     const res = await api.PickToolboxVideo()
     if (!res || res.canceled) return
     if (!res.ok) { toast(res.message || '无法读取该视频'); return }
-    state.toolboxVideo = res.path!
-    state.toolboxVideoInfo = res.version || ''
+    state.toolboxMergeVideo = res.path!
     state.toolboxResult = ''
     render()
   } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
@@ -1954,8 +1972,7 @@ async function pickToolboxAudio() {
     const res = await api.PickToolboxAudio()
     if (!res || res.canceled) return
     if (!res.ok) { toast(res.message || '无法读取该音频'); return }
-    state.toolboxAudio = res.path!
-    state.toolboxAudioInfo = res.version || ''
+    state.toolboxMergeAudio = res.path!
     state.toolboxResult = ''
     render()
   } catch (error) { toast(`选择音频失败：${(error as Error).message}`) }
@@ -1965,12 +1982,13 @@ async function pickToolboxAudio() {
 async function startToolboxTask(kind: 'merge' | 'split') {
   const api = backend()
   if (!api) return
-  if (kind === 'merge' && (!state.toolboxVideo || !state.toolboxAudio)) {
+  if (kind === 'merge' && (!state.toolboxMergeVideo || !state.toolboxMergeAudio)) {
     toast('请先选择视频文件与音频文件'); return
   }
-  if (kind === 'split' && !state.toolboxVideo) {
-    toast('请先选择视频文件'); return
+  if (kind === 'split' && !state.toolboxSplitVideo) {
+    toast('请先选择要分离的视频'); return
   }
+  state.toolboxPhase = kind
   state.toolboxBusy = true
   state.toolboxProgress = 0
   state.toolboxResult = ''
@@ -1978,8 +1996,8 @@ async function startToolboxTask(kind: 'merge' | 'split') {
   render()
   try {
     const res = kind === 'merge'
-      ? await api.MergeVideoAudio!(state.toolboxVideo, state.toolboxAudio)
-      : await api.SplitVideoStream!(state.toolboxVideo)
+      ? await api.MergeVideoAudio!(state.toolboxMergeVideo, state.toolboxMergeAudio)
+      : await api.SplitVideoStream!(state.toolboxSplitVideo)
     if (!res || res.canceled) {
       // 用户在输出目录弹窗点了取消
       state.toolboxBusy = false
@@ -2037,6 +2055,21 @@ async function loadToolboxCompressOptions() {
   }
 }
 
+/** 分离的文件选择:和合并各用一份,不再共用 */
+async function pickToolboxSplitVideo() {
+  const api = backend()
+  if (!api?.PickToolboxVideo) { toast('桌面版中可使用文件选择器'); return }
+  try {
+    const res = await api.PickToolboxVideo()
+    if (!res || res.canceled) return
+    if (!res.ok) { toast(res.message || '无法读取该视频'); return }
+    state.toolboxSplitVideo = res.path!
+    state.toolboxResult = ''
+    state.toolboxCanceled = false
+    render()
+  } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
+}
+
 async function pickToolboxCompressVideo() {
   const api = backend()
   if (!api?.PickToolboxVideo) { toast('桌面版中可使用文件选择器'); return }
@@ -2064,6 +2097,7 @@ async function startToolboxCompress() {
   if (!api) return
   if (!state.toolboxCompressVideo) { toast('请先选择要压缩的视频'); return }
   if (!state.toolboxCompressFormats.length) { toast('压缩选项还没加载好,请稍候再试'); return }
+  state.toolboxPhase = 'compress'
   state.toolboxBusy = true
   state.toolboxProgress = 0
   state.toolboxResult = ''
@@ -2271,6 +2305,7 @@ if (window.runtime?.EventsOn) {
   // 百宝箱:FFmpeg 工具进度
   window.runtime.EventsOn('toolbox:progress', (data) => {
     if (!data) return
+    if (data.phase) state.toolboxPhase = data.phase
     if (typeof data.percent === 'number') state.toolboxProgress = data.percent
     if (data.message) state.toolboxMessage = data.message
     if (state.page !== 'toolbox') return
