@@ -258,3 +258,27 @@ func TestEngineErrorZhOutputFile(t *testing.T) {
 		}
 	}
 }
+
+// TestEngineErrorRuleOrder 规则表首个命中即返回,所以**泛化规则必须排在具体规则后面**。
+// 踩过:"no such file or directory" 放在表头,把 "unable to open cookie file"
+// 那条 Cookies 提示整个吃掉了。
+func TestEngineErrorRuleOrder(t *testing.T) {
+	cases := []struct {
+		raw     string
+		wantSub string
+		why     string
+	}{
+		{"ERROR: unable to open cookie file: No such file or directory", "Cookies 文件无法读取",
+			"具体的 cookie 规则不能被泛化的 no such file 抢走"},
+		{"At least one output file must be specified", "没有指定输出文件",
+			"FFmpeg 用法错误要能命中"},
+		{"No such file or directory", "找不到文件",
+			"没有更具体规则时,泛化规则要能兜住"},
+	}
+	for _, c := range cases {
+		got := engineErrorZh(c.raw)
+		if !strings.Contains(got, c.wantSub) {
+			t.Errorf("%s\n  输入 %q\n  得到 %q, 期望包含 %q", c.why, c.raw, got, c.wantSub)
+		}
+	}
+}
