@@ -1855,6 +1855,14 @@ func extractErrorLines(raw string) string {
 // match 一律小写,匹配前会把待查文本转小写。命中即返回中文说明,不看后面的规则,
 // 所以更具体的规则要排在更笼统的前面。
 var engineErrorRules = []struct{ match, zh string }{
+	// —— FFmpeg 用法/参数错误 ——
+	// 「没有输出文件」是拼命令行时的程序错误(曾经真的漏过输出路径),
+	// 用户看不懂,翻译成人话;同时这条也提醒排查方向
+	{"at least one output file must be specified", "没有指定输出文件，请把这一步的情况反馈给作者"},
+	{"no such file or directory", "找不到文件，可能已被移动或删除"},
+	{"permission denied", "没有写入权限，请换一个输出文件夹"},
+	{"invalid argument", "参数无效，可能是文件损坏或格式不被支持"},
+
 	// —— 内容与权限 ——
 	{"unsupported url", "下载内核不支持这个链接"},
 	{"no video formats found", "没有找到可下载的视频流"},

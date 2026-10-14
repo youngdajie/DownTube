@@ -236,3 +236,25 @@ func TestKillProcessTreeTakesChildrenDown(t *testing.T) {
 	}
 	t.Errorf("❌ 父进程已终止,但最内层子进程 pid=%d 仍在运行", child)
 }
+
+// TestEngineErrorZhOutputFile 这类 FFmpeg 用法报错要翻成中文。
+// 「At least one output file must be specified」曾经原样弹给用户 ——
+// 那是拼命令行时漏了输出路径造成的程序错误,用户看到只会一头雾水。
+func TestEngineErrorZhOutputFile(t *testing.T) {
+	cases := []struct{ raw, wantSub string }{
+		{"[NULL @ 0x1] Unable to find a suitable output format for 'x'\nAt least one output file must be specified", "没有指定输出文件"},
+		{"At least one output file must be specified", "没有指定输出文件"},
+		{"No such file or directory", "找不到文件"},
+		{"Permission denied", "没有写入权限"},
+	}
+	for _, c := range cases {
+		got := engineErrorZh(c.raw)
+		if got == "" {
+			t.Errorf("应能翻译 %q, 实际未命中", c.raw)
+			continue
+		}
+		if !strings.Contains(got, c.wantSub) {
+			t.Errorf("翻译 %q → %q, 期望包含 %q", c.raw, got, c.wantSub)
+		}
+	}
+}

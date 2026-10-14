@@ -175,11 +175,8 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 	if !ok {
 		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
 	}
-	go a.runToolboxFFmpeg(ctx, "merge", "正在合并视频与音频", []string{videoPath, audioPath}, outPath, func(args []string) []string {
-		a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", args[0], "-i", args[1]}
-		a = append(a, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy")
-		return append(a, mp4FaststartArgs(args[2])...)
-	})
+	go a.runToolboxFFmpeg(ctx, "merge", "正在合并视频与音频", []string{videoPath, audioPath}, outPath,
+		buildMergeArgs(videoPath, audioPath, outPath))
 	return ToolboxStartResult{OK: true}
 }
 
@@ -249,7 +246,7 @@ func (a *App) ffmpegPathForToolbox() string {
 }
 
 // runToolboxFFmpeg 跑一次两输入(视频 + 音频)的 ffmpeg,上报进度并在结束时发事件。
-func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inputs []string, outPath string, buildArgs func([]string) []string) {
+func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inputs []string, outPath string, args []string) {
 	defer a.toolbox.end()
 	a.emitToolboxProgress(phase, 0, phaseText+"…")
 	ffmpegPath := a.ffmpegPathForToolbox()
@@ -257,7 +254,6 @@ func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inp
 		a.emitToolboxFinished(false, "FFmpeg 已不可用", "")
 		return
 	}
-	args := buildArgs(append(append([]string{}, inputs...), outPath))
 	total := a.toolboxTotalDuration(ffmpegPath, inputs[0], inputs[1])
 	msg, err := a.execToolboxFFmpeg(ctx, ffmpegPath, args, total, func(percent float64) {
 		a.emitToolboxProgress(phase, percent, phaseText+fmt.Sprintf(" %d%%", int(percent)))
@@ -362,14 +358,38 @@ func (a *App) execToolboxFFmpeg(ctx context.Context, ffmpegPath string, args []s
 	return "完成", nil
 }
 
-// mp4FaststartArgs 只给 mp4 输出加 +faststart —— 把索引挪到文件头部,便于边下边播。
-// mkv / webm 的封装器没有这个选项,加了虽然不报错(实测 ffmpeg 会静默忽略),
-// 但属于无意义参数,不如按容器判断。
-func mp4FaststartArgs(outPath string) []string {
+// outputTailArgs 命令行末尾:mp4 补上 +faststart,然后**必须跟着输出文件路径**。
+//
+// ⚠️ 这个 helper 曾经拆成两半(一个只返回 "-movflags +faststart",输出路径在调用点拼),
+// 结果改的时候把输出路径漏掉了 —— ffmpeg 收不到输出文件,直接报
+//
+//	At least one output file must be specified
+//
+// mp4 是压缩的默认格式,所以合并与压缩两个功能同时全挂。
+// **把输出路径和它前面的参数绑在一起返回,让调用点没法漏。**
+//
+// +faststart 是 mp4 封装器的选项,把索引挪到文件头,便于边下边播;
+// mkv / webm 没有这个选项,加了虽然不报错(实测 ffmpeg 静默忽略),但属于无意义参数。
+func outputTailArgs(outPath string) []string {
 	if strings.EqualFold(filepath.Ext(outPath), ".mp4") {
-		return []string{"-movflags", "+faststart"}
+		return []string{"-movflags", "+faststart", outPath}
 	}
-	return nil
+	return []string{outPath}
+}
+
+// buildMergeArgs 拼合并的完整命令行(末尾含输出文件)。
+func buildMergeArgs(videoPath, audioPath, outPath string) []string {
+	a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats",
+		"-i", videoPath, "-i", audioPath, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy"}
+	return append(a, outputTailArgs(outPath)...)
+}
+
+// buildCompressArgs 拼压缩的完整命令行(末尾含输出文件)。
+func buildCompressArgs(videoPath, outPath string, videoArgs, audioArgs []string) []string {
+	a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", videoPath}
+	a = append(a, videoArgs...)
+	a = append(a, audioArgs...)
+	return append(a, outputTailArgs(outPath)...)
 }
 
 // toolboxTotalDuration 合并任务的总时长按视频与音频里较长的那个算。
@@ -627,12 +647,8 @@ func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResul
 	if !ok {
 		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
 	}
-	go a.runToolboxFFmpeg(ctx, "compress", "正在压缩视频", []string{videoPath, ""}, outPath, func(args []string) []string {
-		a := []string{"-y", "-hide_banner", "-loglevel", "error", "-progress", "pipe:1", "-nostats", "-i", args[0]}
-		a = append(a, videoArgs...)
-		a = append(a, audioArgs...)
-		return append(a, mp4FaststartArgs(args[2])...)
-	})
+	go a.runToolboxFFmpeg(ctx, "compress", "正在压缩视频", []string{videoPath, ""}, outPath,
+		buildCompressArgs(videoPath, outPath, videoArgs, audioArgs))
 	return ToolboxStartResult{OK: true}
 }
 

@@ -1335,3 +1335,6 @@ h1, h2, h3, p { margin: 0; }
    照旧渲染,页面多出一个空框。这里统一压回去,免得每加一个 flex 块踩一次。
    这属于「让 hidden 按语义工作」的修正,不是样式偏好。 */
 [hidden] { display: none !important; }
+
+/* 失败时进度区标题也跟着变红,别让「处理失败」用正常色显示 */
+.tb-progress-head #tbPhase.is-error { color: var(--danger); }

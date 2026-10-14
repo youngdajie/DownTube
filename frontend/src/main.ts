@@ -189,6 +189,9 @@ interface AppState {
   toolboxResult: string
   /** 上一次是用户主动取消的,用来给一句轻提示而不是错误 */
   toolboxCanceled: boolean
+  /** 上一次是不是失败的。**不要靠文案前缀去猜** ——
+      「处理失败:xxx」的 startsWith('失败') 是 false,会把失败渲染成绿色的成功条 */
+  toolboxFailed: boolean
 
   // —— 百宝箱:视频压缩(选项由后端下发,避免两边各写一份) ——
   toolboxCompressVideo: string
@@ -273,6 +276,7 @@ const state: AppState = {
   toolboxMessage: '',
   toolboxResult: '',
   toolboxCanceled: false,
+  toolboxFailed: false,
   toolboxCompressVideo: '',
   toolboxSplitVideo: '',
   toolboxPhase: '',
@@ -913,6 +917,15 @@ function noteOfQuality(id: string) {
 
 /** 任务区:进度与结果渲染在**正在跑的那个面板**里。
     原来它们统一放在卡片最下方,用户在压缩面板点完开始,得往下滚才看得到进度。 */
+/** 进度区的标题文字。失败时要明确写「处理失败」,
+    不能因为 message 为空就退回到「已完成」 */
+function toolboxPhaseLabel() {
+  if (state.toolboxBusy) return state.toolboxMessage || '处理中…'
+  if (state.toolboxResult) return state.toolboxFailed ? '处理失败' : '完成'
+  if (state.toolboxCanceled) return '已取消'
+  return ''
+}
+
 function toolboxTaskArea(phase: string) {
   if (state.toolboxPhase !== phase) return ''
   const showProgress = state.toolboxBusy || !!state.toolboxResult
@@ -920,7 +933,7 @@ function toolboxTaskArea(phase: string) {
   return `
     <div class="tb-progress-wrap" id="tbProgressWrap" ${showProgress ? '' : 'hidden'}>
       <div class="tb-progress-head">
-        <span id="tbPhase">${safe(state.toolboxMessage || (state.toolboxBusy ? '处理中…' : '已完成'))}</span>
+        <span id="tbPhase" class="${state.toolboxFailed ? 'is-error' : ''}">${safe(toolboxPhaseLabel())}</span>
         <span id="tbPercent">${Math.round(state.toolboxProgress)}%</span>
       </div>
       <div class="tb-progress"><div class="tb-progress-bar" id="tbProgressBar" style="width:${Math.round(state.toolboxProgress)}%"></div></div>
@@ -928,7 +941,7 @@ function toolboxTaskArea(phase: string) {
         <button class="btn btn-ghost btn-sm" id="tbCancel" ${state.toolboxBusy ? '' : 'disabled'}>取消</button>
       </div>
     </div>
-    ${result ? `<div class="tb-result-bar ${state.toolboxResult.startsWith('失败') ? 'error' : 'ok'}">
+    ${result ? `<div class="tb-result-bar ${state.toolboxFailed ? 'error' : 'ok'}">
       <span>${state.toolboxResult ? safe(state.toolboxResult) : '已取消'}</span>
       <button class="tb-result-close" id="tbResultClose" title="关闭" aria-label="关闭">${icon('x', 14)}</button>
     </div>` : ''}`
@@ -1405,6 +1418,7 @@ function bind() {
   $('#tbResultClose')?.addEventListener('click', () => {
     state.toolboxResult = ''
     state.toolboxCanceled = false
+    state.toolboxFailed = false
     render()
   })
 
@@ -2018,6 +2032,7 @@ async function startToolboxTask(kind: 'merge' | 'split') {
       state.toolboxBusy = false
       state.toolboxProgress = 0
       state.toolboxMessage = ''
+      state.toolboxFailed = true
       state.toolboxResult = `失败：${res.message || '无法启动'}`
       render()
       toast(res.message || '无法启动')
@@ -2026,6 +2041,7 @@ async function startToolboxTask(kind: 'merge' | 'split') {
   } catch (error) {
     state.toolboxBusy = false
     state.toolboxMessage = ''
+    state.toolboxFailed = true
     state.toolboxResult = `失败：${(error as Error).message}`
     render()
   }
@@ -2074,6 +2090,7 @@ async function pickToolboxSplitVideo() {
     state.toolboxSplitVideo = res.path!
     state.toolboxResult = ''
     state.toolboxCanceled = false
+    state.toolboxFailed = false
     render()
   } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
 }
@@ -2108,6 +2125,7 @@ async function startToolboxCompress() {
   state.toolboxProgress = 0
   state.toolboxResult = ''
   state.toolboxCanceled = false
+  state.toolboxFailed = false
   state.toolboxMessage = '正在准备压缩…'
   render()
   try {
@@ -2127,6 +2145,7 @@ async function startToolboxCompress() {
       state.toolboxBusy = false
       state.toolboxProgress = 0
       state.toolboxMessage = ''
+      state.toolboxFailed = true
       state.toolboxResult = `失败：${res.message || '无法启动'}`
       render()
       toast(res.message || '无法启动')
@@ -2134,6 +2153,7 @@ async function startToolboxCompress() {
   } catch (error) {
     state.toolboxBusy = false
     state.toolboxMessage = ''
+    state.toolboxFailed = true
     state.toolboxResult = `失败：${(error as Error).message}`
     render()
   }
@@ -2327,11 +2347,13 @@ if (window.runtime?.EventsOn) {
       state.toolboxProgress = 0
       state.toolboxResult = ''
       state.toolboxCanceled = true
+      state.toolboxFailed = false
       if (state.page !== 'toolbox') return
       render()
       return
     }
     state.toolboxProgress = data.ok ? 100 : state.toolboxProgress
+    state.toolboxFailed = !data.ok
     state.toolboxResult = data.ok
       ? `已完成,输出目录:${data.output || ''}`
       : `${data.message || '处理失败'}`

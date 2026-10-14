@@ -432,20 +432,91 @@ func TestSplitAudioExt(t *testing.T) {
 	}
 }
 
-// TestMp4FaststartOnlyForMp4 +faststart 是 mp4 封装器的选项。
-// 实测 mkv/webm 加了不报错(ffmpeg 静默忽略),但属于无意义参数。
-func TestMp4FaststartOnlyForMp4(t *testing.T) {
-	for _, p := range []string{"a.mp4", "A.MP4"} {
-		if got := mp4FaststartArgs(p); len(got) != 2 || got[0] != "-movflags" {
-			t.Errorf("%s 应带 +faststart, 得到 %v", p, got)
+// TestBuildArgsEndWithOutputPath 完整命令行**最后一项必须是输出文件**。
+//
+// ⚠️ 这条是拿一次真实故障换来的:上一版把末尾参数拆成
+// 「helper 返回 -movflags +faststart」+「调用点自己拼输出路径」,
+// 结果改的时候输出路径漏掉了,ffmpeg 直接报
+//
+//	At least one output file must be specified
+//
+// mp4 是压缩的默认格式,合并与压缩同时全挂。
+//
+// 当时只有 TestMp4FaststartOnlyForMp4 —— 它单独测 helper,helper 本身没毛病,
+// 所以测试全绿、功能全挂。**测参数拼接必须测最终结果,不能只测零件。**
+func TestBuildArgsEndWithOutputPath(t *testing.T) {
+	cases := []struct{ name, out string }{
+		{"mp4", "D:/out/结果.mp4"},
+		{"mkv", "D:/out/结果.mkv"},
+		{"webm", "D:/out/结果.webm"},
+		{"mka", "D:/out/结果.mka"},
+	}
+	for _, c := range cases {
+		merge := buildMergeArgs("D:/in/v.mp4", "D:/in/a.m4a", c.out)
+		if len(merge) == 0 || merge[len(merge)-1] != c.out {
+			t.Errorf("合并 %s: 命令行末尾应是输出文件 %q, 实际末尾 %q", c.name, c.out, lastOf(merge))
+		}
+		comp := buildCompressArgs("D:/in/v.mp4", c.out, []string{"-c:v", "libx264"}, []string{"-c:a", "aac"})
+		if len(comp) == 0 || comp[len(comp)-1] != c.out {
+			t.Errorf("压缩 %s: 命令行末尾应是输出文件 %q, 实际末尾 %q", c.name, c.out, lastOf(comp))
+		}
+		// 命令行里必须且只能出现一次输出文件(重复会覆盖自己)
+		if n := countOf(merge, c.out); n != 1 {
+			t.Errorf("合并 %s: 输出文件应出现 1 次, 实际 %d 次", c.name, n)
+		}
+		if n := countOf(comp, c.out); n != 1 {
+			t.Errorf("压缩 %s: 输出文件应出现 1 次, 实际 %d 次", c.name, n)
+		}
+		// 必须带输入文件
+		if !containsArg(merge, "-i", "D:/in/v.mp4") || !containsArg(merge, "-i", "D:/in/a.m4a") {
+			t.Errorf("合并 %s: 缺少输入文件", c.name)
+		}
+		if !containsArg(comp, "-i", "D:/in/v.mp4") {
+			t.Errorf("压缩 %s: 缺少输入文件", c.name)
+		}
+		if !containsArg(merge, "-c", "copy") {
+			t.Errorf("合并 %s: 应是流复制", c.name)
 		}
 	}
-	// 上一版这里是硬编码的,分离与压缩都会无脑加上
-	for _, p := range []string{"a.mkv", "a.webm", "a.mka", "a.ogg"} {
-		if got := mp4FaststartArgs(p); len(got) != 0 {
-			t.Errorf("%s 不该带 +faststart, 得到 %v", p, got)
+}
+
+// TestFaststartOnlyForMp4 +faststart 是 mp4 封装器的选项,别的容器不该带。
+func TestFaststartOnlyForMp4(t *testing.T) {
+	for _, out := range []string{"a.mp4", "A.MP4", "/tmp/x.mp4"} {
+		got := outputTailArgs(out)
+		if !containsArg(got, "-movflags", "+faststart") {
+			t.Errorf("%s 应带 +faststart, 得到 %v", out, got)
+		}
+		if got[len(got)-1] != out {
+			t.Errorf("%s 的末尾参数必须是输出文件, 得到 %v", out, got)
 		}
 	}
+	for _, out := range []string{"a.mkv", "a.webm", "a.mka", "a.ogg"} {
+		got := outputTailArgs(out)
+		if len(got) > 1 && got[0] == "-movflags" {
+			t.Errorf("%s 不该带 +faststart, 得到 %v", out, got)
+		}
+		if len(got) != 1 || got[0] != out {
+			t.Errorf("%s 应只返回输出文件本身, 得到 %v", out, got)
+		}
+	}
+}
+
+func lastOf(a []string) string {
+	if len(a) == 0 {
+		return "(空)"
+	}
+	return a[len(a)-1]
+}
+
+func countOf(a []string, want string) int {
+	n := 0
+	for _, v := range a {
+		if v == want {
+			n++
+		}
+	}
+	return n
 }
 
 // TestToolboxTotalDurationSkipsEmptyInput 压缩任务只有一个输入(第二路是空串),
