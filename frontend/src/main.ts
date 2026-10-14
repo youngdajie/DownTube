@@ -898,6 +898,14 @@ function renderToolboxRecommend() {
 }
 
 /** FFmpeg 工具箱:合并 / 分离 */
+/** 档位说明的 HTML 片段。没有说明时返回空串 —— 整个元素都不渲染,
+    而不是渲染出来再拿 hidden 藏掉(那样会留一个空框)。 */
+function qualityNoteHtml() {
+  const text = noteOfQuality(state.toolboxCompressQuality)
+  if (!text) return ''
+  return `<p class="tb-note">${icon('info', 13)}<span>${safe(text)}</span></p>`
+}
+
 /** 取某档压缩率的说明;均衡档不需要说明(它就是默认值),返回空串 */
 function noteOfQuality(id: string) {
   return state.toolboxCompressQualities.find(q => q.id === id)?.note || ''
@@ -988,7 +996,7 @@ function renderToolboxFFmpeg() {
           ${selectControl('toolboxQuality', state.toolboxCompressQualities.map(q => ({ value: q.id, label: q.label })), state.toolboxCompressQuality, '压缩率')}
         </label>
       </div>
-      <p class="tb-note" id="tbQualityNote" ${noteOfQuality(state.toolboxCompressQuality) ? '' : 'hidden'}>${icon('info', 13)}<span>${safe(noteOfQuality(state.toolboxCompressQuality))}</span></p>
+      <div id="tbQualityNoteSlot">${qualityNoteHtml()}</div>
       <p class="tb-note">${icon('cpu', 13)}<span>自动使用显卡编码器加速，未检测到可用显卡时回退 CPU</span></p>
       <div class="tb-actions">
         <button class="btn btn-primary btn-sm" id="tbCompress" ${state.toolboxCompressVideo && !state.toolboxBusy ? '' : 'disabled'}>${icon('package', 14)}开始压缩</button>
@@ -2083,13 +2091,11 @@ async function pickToolboxCompressVideo() {
   } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
 }
 
-/** 压缩率档位切换时,只更新下面那行说明,不整页重绘 */
+/** 压缩率档位切换时只换掉说明槽位的内容,不整页重绘 */
 function patchToolboxQualityNote() {
-  const note = $('#tbQualityNote')
-  if (!note) return
-  const text = noteOfQuality(state.toolboxCompressQuality)
-  note.textContent = text
-  note.hidden = !text   // 没说明就把整行收起来,别留一个空行
+  const slot = $('#tbQualityNoteSlot')
+  if (!slot) return
+  slot.innerHTML = qualityNoteHtml()
 }
 
 async function startToolboxCompress() {

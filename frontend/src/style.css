@@ -1330,6 +1330,8 @@ h1, h2, h3, p { margin: 0; }
 .tb-result-close:hover { opacity: 1; background: rgba(0, 0, 0, .07); }
 :root[data-theme="dark"] .tb-result-close:hover { background: rgba(255, 255, 255, .1); }
 
-/* 元素一旦设了 display(比如 .tb-note 的 flex),就会盖掉 hidden 属性的
-   display:none,于是「隐藏」的注记仍然渲染成一个空框。显式压回去 */
-.tb-note[hidden] { display: none; }
+/* 全局兜底:任何元素只要设了 display(比如 .tb-note 的 flex),就会盖掉
+   hidden 属性依赖的 UA 规则 [hidden]{display:none} —— 于是「隐藏」的元素
+   照旧渲染,页面多出一个空框。这里统一压回去,免得每加一个 flex 块踩一次。
+   这属于「让 hidden 按语义工作」的修正,不是样式偏好。 */
+[hidden] { display: none !important; }
