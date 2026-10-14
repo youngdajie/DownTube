@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -260,9 +261,13 @@ func TestToolboxCompressArgs(t *testing.T) {
 		{"mp4-h265", "libx265", "aac"},
 		{"webm-vp9", "libvpx-vp9", "libopus"},
 	} {
-		args := app.toolboxCompressVideoArgs("Z:/不存在/ffmpeg.exe", tc.format, 26)
+		args, encLabel := app.toolboxCompressVideoArgs("Z:/不存在/ffmpeg.exe", tc.format, 26)
 		if !containsArg(args, "-c:v", tc.want) {
 			t.Errorf("%s 无显卡时应回退 %s, 实际参数 %v", tc.format, tc.want, args)
+		}
+		// 编码器名要能报给用户 —— 压完变大时这是关键线索
+		if !strings.HasPrefix(encLabel, "CPU · ") {
+			t.Errorf("%s 无显卡时编码器名应以「CPU · 」开头, 实际 %q", tc.format, encLabel)
 		}
 		if !containsArg(args, "-crf", "26") {
 			t.Errorf("%s 应带上 -crf 26, 实际参数 %v", tc.format, args)
@@ -273,7 +278,7 @@ func TestToolboxCompressArgs(t *testing.T) {
 		}
 	}
 	// VP9 的 CRF 模式必须配 -b:v 0,否则按 VBR 跑,画质档位失效
-	vp9 := app.toolboxCompressVideoArgs("Z:/不存在/ffmpeg.exe", "webm-vp9", 28)
+	vp9, _ := app.toolboxCompressVideoArgs("Z:/不存在/ffmpeg.exe", "webm-vp9", 28)
 	if !containsArg(vp9, "-b:v", "0") {
 		t.Errorf("VP9 必须配 -b:v 0, 实际 %v", vp9)
 	}

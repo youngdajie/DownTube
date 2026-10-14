@@ -44,6 +44,15 @@ type ToolboxFinished struct {
 	Canceled bool   `json:"canceled,omitempty"` // 用户主动取消,不是失败
 	Message  string `json:"message"`
 	Output   string `json:"output,omitempty"` // 成功时的输出目录
+
+	// 体积对比。压缩有可能压完更大(源本身就压得很狠、档位又选了高画质、
+	// 或者用了效率较低的显卡编码器),不给数字用户没法判断发生了什么。
+	InputSize  int64 `json:"inputSize,omitempty"`
+	OutputSize int64 `json:"outputSize,omitempty"`
+
+	// 压缩用的编码器(如「显卡 · nvenc」/「CPU · libx264」)。
+	// 显卡编码在同档位下产物通常比 CPU 大不少,压完变大时这是关键线索。
+	Encoder string `json:"encoder,omitempty"`
 }
 
 // toolboxRunner 持有「当前是否有任务在跑」与取消钩子。
@@ -176,7 +185,7 @@ func (a *App) MergeVideoAudio(videoPath, audioPath string) ToolboxStartResult {
 		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
 	}
 	go a.runToolboxFFmpeg(ctx, "merge", "正在合并视频与音频", []string{videoPath, audioPath}, outPath,
-		buildMergeArgs(videoPath, audioPath, outPath))
+		buildMergeArgs(videoPath, audioPath, outPath), "")
 	return ToolboxStartResult{OK: true}
 }
 
@@ -246,7 +255,7 @@ func (a *App) ffmpegPathForToolbox() string {
 }
 
 // runToolboxFFmpeg 跑一次两输入(视频 + 音频)的 ffmpeg,上报进度并在结束时发事件。
-func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inputs []string, outPath string, args []string) {
+func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inputs []string, outPath string, args []string, encoder string) {
 	defer a.toolbox.end()
 	a.emitToolboxProgress(phase, 0, phaseText+"…")
 	ffmpegPath := a.ffmpegPathForToolbox()
@@ -267,7 +276,28 @@ func (a *App) runToolboxFFmpeg(ctx context.Context, phase, phaseText string, inp
 		return
 	}
 	a.emitToolboxProgress(phase, 100, "完成")
-	a.emitToolboxFinished(true, msg, filepath.Dir(outPath))
+	ev := okWithSizes(msg, filepath.Dir(outPath), inputs[0], outPath)
+	ev.Encoder = encoder
+	a.emitToolboxFinishedEvent(ev)
+}
+
+// fileSize 取文件体积,取不到返回 0(体积只用于展示,不该影响流程)
+func fileSize(path string) int64 {
+	if path == "" {
+		return 0
+	}
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return info.Size()
+	}
+	return 0
+}
+
+// okWithSizes 组装一个带体积对比的成功事件
+func okWithSizes(msg, outDir, inputPath, outputPath string) ToolboxFinished {
+	return ToolboxFinished{
+		OK: true, Message: msg, Output: outDir,
+		InputSize: fileSize(inputPath), OutputSize: fileSize(outputPath),
+	}
 }
 
 // runSplitFFmpeg 跑两次 ffmpeg:先抽视频流,再抽音频流,各自上报进度。
@@ -304,7 +334,11 @@ func (a *App) runSplitFFmpeg(ctx context.Context, ffmpegPath, videoPath, videoOu
 	}
 
 	a.emitToolboxProgress("split", 100, "完成")
-	a.emitToolboxFinished(true, "已分离为视频流与音频流", outDir)
+	a.emitToolboxFinishedEvent(ToolboxFinished{
+		OK: true, Message: "已分离为视频流与音频流", Output: outDir,
+		InputSize:  fileSize(videoPath),
+		OutputSize: fileSize(videoOut) + fileSize(audioOut),
+	})
 }
 
 func (a *App) finishSplitError(ctx context.Context, err error) {
@@ -423,10 +457,15 @@ func (a *App) emitToolboxFinishedCanceled() {
 }
 
 func (a *App) emitToolboxFinished(ok bool, message, output string) {
+	a.emitToolboxFinishedEvent(ToolboxFinished{OK: ok, Message: message, Output: output})
+}
+
+// emitToolboxFinishedEvent 发送一个已经组装好的完成事件(带体积等附加信息)
+func (a *App) emitToolboxFinishedEvent(ev ToolboxFinished) {
 	if a.ctx == nil || a.disableEvents {
 		return
 	}
-	runtime.EventsEmit(a.ctx, "toolbox:finished", ToolboxFinished{OK: ok, Message: message, Output: output})
+	runtime.EventsEmit(a.ctx, "toolbox:finished", ev)
 }
 
 // probeVideoCodec / probeAudioCodec 用 ffprobe 读编码器名,用来决定输出容器。
@@ -634,7 +673,7 @@ func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResul
 	preset := toolboxCompressQuality(quality)
 	crf := toolboxCompressCRF(preset.ID)
 
-	videoArgs := a.toolboxCompressVideoArgs(ffmpegPath, target.ID, crf)
+	videoArgs, encoderLabel := a.toolboxCompressVideoArgs(ffmpegPath, target.ID, crf)
 	audioArgs := toolboxCompressAudioArgs(target.ID)
 
 	outDir, canceled := a.askToolboxOutputDir()
@@ -648,7 +687,7 @@ func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResul
 		return ToolboxStartResult{OK: false, Message: "已有一个任务正在进行,请先等它完成或取消"}
 	}
 	go a.runToolboxFFmpeg(ctx, "compress", "正在压缩视频", []string{videoPath, ""}, outPath,
-		buildCompressArgs(videoPath, outPath, videoArgs, audioArgs))
+		buildCompressArgs(videoPath, outPath, videoArgs, audioArgs), encoderLabel)
 	return ToolboxStartResult{OK: true}
 }
 
@@ -657,23 +696,26 @@ func (a *App) CompressVideo(videoPath, format, quality string) ToolboxStartResul
 // 有可用的显卡编码器就用它,并把**用户选的画质值替换进去** ——
 // 参数表里的画质是给下载转码用的固定值,压缩必须尊重用户选的档位,
 // 否则下拉里选什么都不会生效。
-func (a *App) toolboxCompressVideoArgs(ffmpegPath, formatID string, crf int) []string {
+// toolboxCompressVideoArgs 返回编码参数与**用的哪个编码器**。
+// 编码器名要显示给用户:显卡编码在同档位下产物明显大于 CPU,
+// 压完反而变大时这是第一嫌疑。
+func (a *App) toolboxCompressVideoArgs(ffmpegPath, formatID string, crf int) ([]string, string) {
 	q := strconv.Itoa(crf)
 	switch formatID {
 	case "mp4-h265":
 		if spec, ok := a.resolveToolboxGPU(ffmpegPath, "hevc"); ok {
-			return withQuality(spec, crf)
+			return withQuality(spec, crf), "显卡 · " + spec.id
 		}
-		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", q}
+		return []string{"-c:v", "libx265", "-preset", "medium", "-crf", q}, "CPU · libx265"
 	case "webm-vp9":
 		// Windows 上没有可用的 VP9 显卡编码器,固定走 CPU。
 		// CRF 模式必须配 -b:v 0,否则 ffmpeg 会按普通 VBR 跑,画质档位失效
-		return []string{"-c:v", "libvpx-vp9", "-crf", q, "-b:v", "0", "-row-mt", "1"}
+		return []string{"-c:v", "libvpx-vp9", "-crf", q, "-b:v", "0", "-row-mt", "1"}, "CPU · libvpx-vp9"
 	default: // mp4-h264
 		if spec, ok := a.resolveToolboxGPU(ffmpegPath, "h264"); ok {
-			return withQuality(spec, crf)
+			return withQuality(spec, crf), "显卡 · " + spec.id
 		}
-		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", q}
+		return []string{"-c:v", "libx264", "-preset", "medium", "-crf", q}, "CPU · libx264"
 	}
 }
 

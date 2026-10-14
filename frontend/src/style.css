@@ -1338,3 +1338,6 @@ h1, h2, h3, p { margin: 0; }
 
 /* 失败时进度区标题也跟着变红,别让「处理失败」用正常色显示 */
 .tb-progress-head #tbPhase.is-error { color: var(--danger); }
+
+/* 成功但结论不理想(压缩后反而变大):用警示色,别用成功的绿 */
+.tb-result-bar.warn { background: var(--warning-soft); color: var(--warning); }

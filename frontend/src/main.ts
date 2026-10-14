@@ -192,6 +192,8 @@ interface AppState {
   /** 上一次是不是失败的。**不要靠文案前缀去猜** ——
       「处理失败:xxx」的 startsWith('失败') 是 false,会把失败渲染成绿色的成功条 */
   toolboxFailed: boolean
+  /** 任务成功了但结论不理想(比如压缩后反而变大)。用警示色,不用成功的绿色 */
+  toolboxWarned: boolean
 
   // —— 百宝箱:视频压缩(选项由后端下发,避免两边各写一份) ——
   toolboxCompressVideo: string
@@ -277,6 +279,7 @@ const state: AppState = {
   toolboxResult: '',
   toolboxCanceled: false,
   toolboxFailed: false,
+  toolboxWarned: false,
   toolboxCompressVideo: '',
   toolboxSplitVideo: '',
   toolboxPhase: '',
@@ -915,6 +918,15 @@ function noteOfQuality(id: string) {
   return state.toolboxCompressQualities.find(q => q.id === id)?.note || ''
 }
 
+/** 把字节数写成人看的样子 */
+function humanSize(bytes: number) {
+  if (!bytes || bytes <= 0) return ''
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
+}
+
 /** 任务区:进度与结果渲染在**正在跑的那个面板**里。
     原来它们统一放在卡片最下方,用户在压缩面板点完开始,得往下滚才看得到进度。 */
 /** 进度区的标题文字。失败时要明确写「处理失败」,
@@ -924,6 +936,30 @@ function toolboxPhaseLabel() {
   if (state.toolboxResult) return state.toolboxFailed ? '处理失败' : '完成'
   if (state.toolboxCanceled) return '已取消'
   return ''
+}
+
+/** 完成文案。带上体积对比 —— 压缩有可能压完反而更大,
+    不说清数字用户会以为是功能坏了 */
+function toolboxDoneText(data: any) {
+  const inSize = data?.inputSize || 0
+  const outSize = data?.outputSize || 0
+  const dir = data?.output || ''
+  const encoder = data?.encoder || ''
+  if (!inSize || !outSize) return `已完成,输出目录:${dir}`
+
+  const before = humanSize(inSize)
+  const after = humanSize(outSize)
+  const delta = Math.round((outSize - inSize) / inSize * 100)
+  const enc = encoder ? `(编码器:${encoder})` : ''
+
+  if (outSize > inSize) {
+    // 变大了:说清原因并给出可操作的建议。
+    // 显卡编码是头号嫌疑 —— 同档位下它的产物明显大于 CPU。
+    return `压缩完成,但文件变大了:${before} → ${after}(+${delta}%)${enc}。` +
+      `常见原因是这个视频本身已经压得很小,或者用了显卡编码。` +
+      `想让它更小,把压缩率改成「小体积」再试一次。`
+  }
+  return `已完成:${before} → ${after}(${delta === 0 ? '基本持平' : `减少 ${Math.abs(delta)}%`})${enc},输出目录:${dir}`
 }
 
 function toolboxTaskArea(phase: string) {
@@ -941,7 +977,7 @@ function toolboxTaskArea(phase: string) {
         <button class="btn btn-ghost btn-sm" id="tbCancel" ${state.toolboxBusy ? '' : 'disabled'}>取消</button>
       </div>
     </div>
-    ${result ? `<div class="tb-result-bar ${state.toolboxFailed ? 'error' : 'ok'}">
+    ${result ? `<div class="tb-result-bar ${state.toolboxFailed ? 'error' : state.toolboxWarned ? 'warn' : 'ok'}">
       <span>${state.toolboxResult ? safe(state.toolboxResult) : '已取消'}</span>
       <button class="tb-result-close" id="tbResultClose" title="关闭" aria-label="关闭">${icon('x', 14)}</button>
     </div>` : ''}`
@@ -1419,6 +1455,7 @@ function bind() {
     state.toolboxResult = ''
     state.toolboxCanceled = false
     state.toolboxFailed = false
+    state.toolboxWarned = false
     render()
   })
 
@@ -2091,6 +2128,7 @@ async function pickToolboxSplitVideo() {
     state.toolboxResult = ''
     state.toolboxCanceled = false
     state.toolboxFailed = false
+    state.toolboxWarned = false
     render()
   } catch (error) { toast(`选择视频失败：${(error as Error).message}`) }
 }
@@ -2354,9 +2392,9 @@ if (window.runtime?.EventsOn) {
     }
     state.toolboxProgress = data.ok ? 100 : state.toolboxProgress
     state.toolboxFailed = !data.ok
-    state.toolboxResult = data.ok
-      ? `已完成,输出目录:${data.output || ''}`
-      : `${data.message || '处理失败'}`
+    // 压完变大:任务算成功,但结论是负面的,用警示色而不是成功的绿色
+    state.toolboxWarned = data.ok && !!data.inputSize && !!data.outputSize && data.outputSize > data.inputSize
+    state.toolboxResult = data.ok ? toolboxDoneText(data) : `${data.message || '处理失败'}`
     if (state.page !== 'toolbox') return
     render()
   })
