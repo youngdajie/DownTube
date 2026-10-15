@@ -1302,20 +1302,39 @@ h1, h2, h3, p { margin: 0; }
 /* ============================================================ 推荐页 */
 /* 复用设置页的 .settings-layout / .settings-nav / .snav-item 两栏骨架,
    这里只补右侧详情区自己的样式 */
-.rec-detail { display: flex; flex-direction: column; align-items: flex-start; }
+
+/* 详情用一块浅蓝托住 —— 跟程序里其它强调块(如百宝箱的操作条)是同一套语言。
+   不加这层的话,说明、提示、来源、按钮四块散在白底上,没有整体感 */
+.rec-detail {
+  padding: 14px 15px 13px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  /* 内容左对齐,别被 flex 拉散 */
+  display: block;
+}
 .rec-detail-desc {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 13px; line-height: 1.8; color: var(--text-2);
 }
+
+/* 提示比正文更重一档:图标用主色,文字用正常色而不是浅灰 */
+.rec-detail-tip {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin: 10px 0 0;
+  font-size: 12.5px; line-height: 1.7; color: var(--text);
+}
+.rec-detail-tip svg { flex: none; margin-top: 3px; color: var(--primary); }
+
 .rec-detail-foot {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
-  width: 100%; margin-top: 13px; padding-top: 13px;
-  border-top: 1px solid var(--border);
+  margin-top: 13px; padding-top: 12px;
+  /* 浅蓝底上用更深一档的蓝做分隔线,不用灰色 */
+  border-top: 1px solid var(--primary-soft-2);
 }
 .rec-host {
   display: flex; align-items: center; gap: 5px;
-  font-size: 12px; color: var(--text-3);
+  font-size: 12px; color: var(--text-2);
 }
 .rec-host svg { flex: none; }
 .rec-detail-actions { display: flex; gap: 8px; }

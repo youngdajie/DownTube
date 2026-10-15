@@ -906,7 +906,7 @@ function renderRecommend() {
         </div>
         <div class="rec-detail">
           <p class="rec-detail-desc">${safe(rec.desc)}</p>
-          ${rec.tip ? `<p class="tb-note">${icon('checkcircle', 13)}<span>${safe(rec.tip)}</span></p>` : ''}
+          ${rec.tip ? `<p class="rec-detail-tip">${icon('checkcircle', 14)}<span>${safe(rec.tip)}</span></p>` : ''}
           <div class="rec-detail-foot">
             <span class="rec-host">${icon('link', 13)}${safe(recommendHost(rec.url))}</span>
             <span class="rec-detail-actions">
