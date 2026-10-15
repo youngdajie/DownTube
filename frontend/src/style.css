@@ -119,43 +119,82 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* 标题栏:左侧留白可拖拽,右侧为昼夜切换与窗口控制 */
+/* 标题栏底边:原来是 1px 直线,现在换成三层海浪般的波纹。
+   形状来自 mask(每层一段可无缝平铺的 SVG 描边路径),颜色走 CSS 变量,
+   所以深浅主题各自适配 —— 用 background-image 做不到,颜色会被写死在 URI 里。
+
+   三层的周期(60/30/20 px)与速度(11s/8s/6s)都不同,彼此错拍,
+   叠出来的才是「层次波纹」而不是三条同步的线。
+   每层平移距离正好等于自己的周期,所以循环接缝看不出来。
+
+   标题栏加高到 54px 并留出 18px 底部 padding,让内容与按钮浮在波浪之上,
+   不再和波纹挨着(间距 6px,是按按钮高度与波浪高度算出来的,不是估的)。 */
 .titlebar {
-  height: 42px;
+  height: 54px;
   flex: none;
   display: flex;
   align-items: stretch;
   background: var(--bg);
   position: relative;
+  /* 把内容抬到波浪上方。几何是算过的:
+     内容盒 54-18=36px,32px 的按钮居中后底边在 34,波浪从 40 开始 —— 留 6px */
+  padding-bottom: 18px;
   --wails-draggable: drag;
 }
-
-/* 标题栏底边:原来是 1px 直线,现在换成缓慢漂移的波浪。
-   形状来自 mask(一段 60px 可无缝平铺的 SVG),颜色走 CSS 变量,
-   所以深浅主题各自适配 —— 这一点用 background-image 做不到,
-   因为 data URI 里写死了颜色。
-   pointer-events: none 保证不影响标题栏的拖动与按钮点击 */
 .titlebar-wave {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  height: 8px;
-  pointer-events: none;
-  background: linear-gradient(var(--primary-soft-2), transparent);
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='8' viewBox='0 0 60 8'%3E%3Cpath d='M0,4 Q15,1 30,4 Q45,7 60,4 L60,8 L0,8 Z' fill='%23000'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='8' viewBox='0 0 60 8'%3E%3Cpath d='M0,4 Q15,1 30,4 Q45,7 60,4 L60,8 L0,8 Z' fill='%23000'/%3E%3C/svg%3E");
-  -webkit-mask-size: 60px 8px;
-  mask-size: 60px 8px;
+  height: 14px;
+  pointer-events: none;   /* 不影响标题栏拖动与按钮点击 */
+}
+.titlebar-wave i {
+  position: absolute;
+  left: 0; right: 0;
+  height: 9px;
+  display: block;
+  background-repeat: no-repeat;
   -webkit-mask-repeat: repeat-x;
   mask-repeat: repeat-x;
-  animation: titlebar-wave-drift 7s linear infinite;
 }
-/* 位移正好一个周期(60px),所以接缝看不出来 */
-@keyframes titlebar-wave-drift {
-  from { -webkit-mask-position-x: 0; mask-position-x: 0; }
-  to   { -webkit-mask-position-x: 60px; mask-position-x: 60px; }
+/* 第三层最前,用主色,压得住场 */
+.titlebar-wave i:nth-child(3) {
+  top: 6px;
+  background-color: var(--primary);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='9' viewBox='0 0 60 9'%3E%3Cpath d='M0,4.5 Q5,1.5 10,4.5 Q15,7.5 20,4.5 Q25,1.5 30,4.5 Q35,7.5 40,4.5 Q45,1.5 50,4.5 Q55,7.5 60,4.5' fill='none' stroke='%23000' stroke-width='1.3'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='9' viewBox='0 0 60 9'%3E%3Cpath d='M0,4.5 Q5,1.5 10,4.5 Q15,7.5 20,4.5 Q25,1.5 30,4.5 Q35,7.5 40,4.5 Q45,1.5 50,4.5 Q55,7.5 60,4.5' fill='none' stroke='%23000' stroke-width='1.3'/%3E%3C/svg%3E");
+  -webkit-mask-size: 60px 9px;
+  mask-size: 60px 9px;
+  animation: wave-drift-20 6s linear infinite;
 }
+/* 第二层居中,稍浅 */
+.titlebar-wave i:nth-child(2) {
+  top: 3px;
+  background-color: var(--primary);
+  opacity: .5;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='9' viewBox='0 0 60 9'%3E%3Cpath d='M0,4.5 Q7.5,1 15,4.5 Q22.5,8 30,4.5 Q37.5,1 45,4.5 Q52.5,8 60,4.5' fill='none' stroke='%23000' stroke-width='1.2'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='9' viewBox='0 0 60 9'%3E%3Cpath d='M0,4.5 Q7.5,1 15,4.5 Q22.5,8 30,4.5 Q37.5,1 45,4.5 Q52.5,8 60,4.5' fill='none' stroke='%23000' stroke-width='1.2'/%3E%3C/svg%3E");
+  -webkit-mask-size: 60px 9px;
+  mask-size: 60px 9px;
+  animation: wave-drift-30 8s linear infinite;
+}
+/* 第一层最后,最浅最慢,退到背景里 */
+.titlebar-wave i:nth-child(1) {
+  top: 0;
+  background-color: var(--primary);
+  opacity: .28;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='9' viewBox='0 0 60 9'%3E%3Cpath d='M0,4.5 Q15,1.5 30,4.5 Q45,7.5 60,4.5' fill='none' stroke='%23000' stroke-width='1.1'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='9' viewBox='0 0 60 9'%3E%3Cpath d='M0,4.5 Q15,1.5 30,4.5 Q45,7.5 60,4.5' fill='none' stroke='%23000' stroke-width='1.1'/%3E%3C/svg%3E");
+  -webkit-mask-size: 60px 9px;
+  mask-size: 60px 9px;
+  animation: wave-drift-60 11s linear infinite;
+}
+/* 位移距离 = 各自的周期,接缝不可见 */
+@keyframes wave-drift-60 { from { -webkit-mask-position-x: 0; mask-position-x: 0; } to { -webkit-mask-position-x: 60px; mask-position-x: 60px; } }
+@keyframes wave-drift-30 { from { -webkit-mask-position-x: 0; mask-position-x: 0; } to { -webkit-mask-position-x: 30px; mask-position-x: 30px; } }
+@keyframes wave-drift-20 { from { -webkit-mask-position-x: 0; mask-position-x: 0; } to { -webkit-mask-position-x: 20px; mask-position-x: 20px; } }
 /* 尊重系统的「减少动态效果」设置 */
 @media (prefers-reduced-motion: reduce) {
-  .titlebar-wave { animation: none; }
+  .titlebar-wave i { animation: none; }
 }
 .titlebar-drag { flex: 1; min-width: 0; }
 .titlebar-title {
