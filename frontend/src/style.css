@@ -156,8 +156,8 @@ h1, h2, h3, p { margin: 0; }
 /* 最前一层:峰最低、波长最短、跑最快、最浓 */
 .titlebar-wave i:nth-child(3) {
   opacity: .55;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='14' viewBox='0 0 30 14'%3E%3Cpath d='M0,10 Q7.5,6 15,10 Q22.5,14 30,10 L30,14 L0,14 Z' fill='%23000'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='14' viewBox='0 0 30 14'%3E%3Cpath d='M0,10 Q7.5,6 15,10 Q22.5,14 30,10 L30,14 L0,14 Z' fill='%23000'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='14' viewBox='0 0 30 14'%3E%3Cpath d='M0,6 Q7.5,3.5 15,6 Q22.5,8.5 30,6 L30,11 Q22.5,13.5 15,11 Q7.5,8.5 0,11 Z' fill='%23000'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='30' height='14' viewBox='0 0 30 14'%3E%3Cpath d='M0,6 Q7.5,3.5 15,6 Q22.5,8.5 30,6 L30,11 Q22.5,13.5 15,11 Q7.5,8.5 0,11 Z' fill='%23000'/%3E%3C/svg%3E");
   -webkit-mask-size: 30px 14px;
   mask-size: 30px 14px;
   animation: wave-drift-30 6.5s linear infinite;
@@ -165,8 +165,8 @@ h1, h2, h3, p { margin: 0; }
 /* 中间一层 */
 .titlebar-wave i:nth-child(2) {
   opacity: .32;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='45' height='14' viewBox='0 0 45 14'%3E%3Cpath d='M0,9 Q11.25,4 22.5,9 Q33.75,14 45,9 L45,14 L0,14 Z' fill='%23000'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='45' height='14' viewBox='0 0 45 14'%3E%3Cpath d='M0,9 Q11.25,4 22.5,9 Q33.75,14 45,9 L45,14 L0,14 Z' fill='%23000'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='45' height='14' viewBox='0 0 45 14'%3E%3Cpath d='M0,5 Q11.25,2 22.5,5 Q33.75,8 45,5 L45,10 Q33.75,13 22.5,10 Q11.25,7 0,10 Z' fill='%23000'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='45' height='14' viewBox='0 0 45 14'%3E%3Cpath d='M0,5 Q11.25,2 22.5,5 Q33.75,8 45,5 L45,10 Q33.75,13 22.5,10 Q11.25,7 0,10 Z' fill='%23000'/%3E%3C/svg%3E");
   -webkit-mask-size: 45px 14px;
   mask-size: 45px 14px;
   animation: wave-drift-45 9s linear infinite;
@@ -174,8 +174,8 @@ h1, h2, h3, p { margin: 0; }
 /* 最后(最靠里)一层:峰最高、波长最长、最慢、最淡,退到背景里 */
 .titlebar-wave i:nth-child(1) {
   opacity: .18;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='14' viewBox='0 0 60 14'%3E%3Cpath d='M0,8 Q15,2 30,8 Q45,14 60,8 L60,14 L0,14 Z' fill='%23000'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='14' viewBox='0 0 60 14'%3E%3Cpath d='M0,8 Q15,2 30,8 Q45,14 60,8 L60,14 L0,14 Z' fill='%23000'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='14' viewBox='0 0 60 14'%3E%3Cpath d='M0,4 Q15,1 30,4 Q45,7 60,4 L60,9 Q45,12 30,9 Q15,6 0,9 Z' fill='%23000'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='14' viewBox='0 0 60 14'%3E%3Cpath d='M0,4 Q15,1 30,4 Q45,7 60,4 L60,9 Q45,12 30,9 Q15,6 0,9 Z' fill='%23000'/%3E%3C/svg%3E");
   -webkit-mask-size: 60px 14px;
   mask-size: 60px 14px;
   animation: wave-drift-60 13s linear infinite;
