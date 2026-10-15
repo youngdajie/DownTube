@@ -385,6 +385,47 @@ async function refreshSnapshot() {
 // ============================================================
 // 渲染
 // ============================================================
+/** 当前页面对应的 HTML(render 全量重绘与 renderPage 局部重绘共用) */
+function renderPageHTML() {
+  return state.page === 'downloads' ? renderDownloads()
+    : state.page === 'settings' ? renderSettings()
+    : state.page === 'toolbox' ? renderToolbox()
+    : state.page === 'recommend' ? renderRecommend()
+    : renderAbout()
+}
+
+/** 只重绘 .page 区域并刷新导航高亮,**不重建标题栏与侧边栏**。
+    之前切页面走的是全量 render(),会整棵树 innerHTML 重建 ——
+    标题栏的波浪动画因此从头再来,看着「闪一下」。
+    标题栏/侧边栏只在真正需要时(主题、窗口状态、任务数变化)才重绘。 */
+function renderPage() {
+  const content = root.querySelector<HTMLElement>('.content')
+  const pageEl = root.querySelector<HTMLElement>('.page')
+  if (!content || !pageEl) { render(); return }
+
+  // 页面切换入场动画:去掉类 → 强制回流 → 再加回,让它重新触发
+  content.classList.remove('page-enter')
+  void content.offsetWidth
+  if (state.enterAnim) content.classList.add('page-enter')
+  state.enterAnim = false
+
+  pageEl.innerHTML = renderPageHTML()
+
+  // 导航高亮 + 下载数徽标
+  root.querySelectorAll('.nav-item').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-page') === state.page)
+  })
+  const badge = root.querySelector('.nav-item[data-page="downloads"] em')
+  if (badge) badge.textContent = String(state.tasks.length || '')
+
+  // 滚动复位(切页要回到顶部)
+  if (scrollReset) { content.scrollTop = 0; scrollReset = false }
+
+  // 页面的「首次进入」钩子,与 render() 保持一致
+  if (state.page === 'settings' && state.settingsSection === 'format') refreshEncoderHint()
+  if (state.page === 'toolbox' && !state.toolboxCompressFormats.length) loadToolboxCompressOptions()
+}
+
 function render() {
   const active = document.activeElement as (Element & { selectionStart?: number | null }) | null
   const activeId = active && active !== document.body && active.id ? active.id : ''
@@ -427,7 +468,7 @@ function render() {
         </aside>
         <main class="main">
           <div class="content ${state.enterAnim ? 'page-enter' : ''}">
-            <div class="page">${state.page === 'downloads' ? renderDownloads() : state.page === 'settings' ? renderSettings() : state.page === 'toolbox' ? renderToolbox() : state.page === 'recommend' ? renderRecommend() : renderAbout()}</div>
+            <div class="page">${renderPageHTML()}</div>
           </div>
           ${renderStatusbar()}
         </main>
@@ -1275,7 +1316,7 @@ root.addEventListener('click', event => {
       scrollReset = true
       state.page = page as AppState['page']
       if (page === 'settings') { captureSettingsBaseline(); refreshBrowserRunning(); refreshCookieStatus() }
-      render()
+      renderPage()
     }
     return
   }
@@ -1285,7 +1326,7 @@ root.addEventListener('click', event => {
     if (sectionBtn.dataset.section !== state.settingsSection) {
       state.settingsSection = sectionBtn.dataset.section!
       scrollReset = true
-      render()
+      renderPage()
     }
     return
   }
@@ -2135,10 +2176,11 @@ async function loadToolboxCompressOptions() {
       }
     }
     // 选项是异步拿到的,首帧渲染时两个下拉框还是空的 —— 必须补一次渲染,
-    // 否则用户看到的是空下拉,而且此时任何 change 事件都会把状态写成空串
-    if (state.page === 'toolbox') render()
+    // 否则用户看到的是空下拉,而且此时任何 change 事件都会把状态写成空串。
+    // 只重绘页面区(renderPage),别全量 render —— 否则标题栏的波浪动画会从头再来
+    if (state.page === 'toolbox') renderPage()
   } catch {
-    if (state.page === 'toolbox') { toast('压缩选项加载失败，请重新进入本页'); render() }
+    if (state.page === 'toolbox') { toast('压缩选项加载失败，请重新进入本页'); renderPage() }
   }
 }
 
