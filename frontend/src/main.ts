@@ -396,6 +396,7 @@ function render() {
   root.innerHTML = `
     <div class="app-window">
       <header class="titlebar" id="windowTitlebar">
+        <div class="titlebar-wave" aria-hidden="true"></div>
         <div class="titlebar-title">DownTube</div>
         <div class="titlebar-drag"></div>
         <div class="titlebar-tools">

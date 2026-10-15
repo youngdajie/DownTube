@@ -125,8 +125,37 @@ h1, h2, h3, p { margin: 0; }
   display: flex;
   align-items: stretch;
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  position: relative;
   --wails-draggable: drag;
+}
+
+/* 标题栏底边:原来是 1px 直线,现在换成缓慢漂移的波浪。
+   形状来自 mask(一段 60px 可无缝平铺的 SVG),颜色走 CSS 变量,
+   所以深浅主题各自适配 —— 这一点用 background-image 做不到,
+   因为 data URI 里写死了颜色。
+   pointer-events: none 保证不影响标题栏的拖动与按钮点击 */
+.titlebar-wave {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 8px;
+  pointer-events: none;
+  background: linear-gradient(var(--primary-soft-2), transparent);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='8' viewBox='0 0 60 8'%3E%3Cpath d='M0,4 Q15,1 30,4 Q45,7 60,4 L60,8 L0,8 Z' fill='%23000'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='8' viewBox='0 0 60 8'%3E%3Cpath d='M0,4 Q15,1 30,4 Q45,7 60,4 L60,8 L0,8 Z' fill='%23000'/%3E%3C/svg%3E");
+  -webkit-mask-size: 60px 8px;
+  mask-size: 60px 8px;
+  -webkit-mask-repeat: repeat-x;
+  mask-repeat: repeat-x;
+  animation: titlebar-wave-drift 7s linear infinite;
+}
+/* 位移正好一个周期(60px),所以接缝看不出来 */
+@keyframes titlebar-wave-drift {
+  from { -webkit-mask-position-x: 0; mask-position-x: 0; }
+  to   { -webkit-mask-position-x: 60px; mask-position-x: 60px; }
+}
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  .titlebar-wave { animation: none; }
 }
 .titlebar-drag { flex: 1; min-width: 0; }
 .titlebar-title {
