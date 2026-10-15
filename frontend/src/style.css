@@ -1127,52 +1127,6 @@ h1, h2, h3, p { margin: 0; }
   display: flex; align-items: center; justify-content: center;
 }
 
-/* —— 推荐模块 —— */
-/* 一条推荐一张卡,沿用程序里 .card 的尺寸语言(1px 细边、12px 圆角、白底)
-   蓝色操作条把「提示 + 两个按钮」收在一处,是这个卡片的视觉落点 */
-.tb-rec-list { display: flex; flex-direction: column; gap: 11px; }
-
-.tb-rec {
-  padding: 14px 15px 13px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
-  transition: border-color .2s ease;
-}
-.tb-rec:hover { border-color: var(--border-2); }
-
-.tb-rec-top { display: flex; align-items: center; gap: 9px; }
-.tb-rec-name { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -.01em; }
-.tb-rec-kind {
-  flex: none; padding: 3.5px 9px;
-  font-size: 10.5px; line-height: 1; font-weight: 500;
-  border-radius: 999px;                 /* 胶囊形,比圆角矩形更轻快 */
-  background: var(--primary-soft); color: var(--primary);
-}
-.tb-rec-host {
-  margin-left: auto; display: flex; align-items: center; gap: 4px;
-  font-size: 11px; color: var(--text-3);
-}
-.tb-rec-host svg { flex: none; }
-
-.tb-rec-desc { margin: 8px 0 0; font-size: 12.5px; line-height: 1.7; color: var(--text-2); }
-
-/* 蓝色操作条。空间够时提示与按钮同一行,窄了自动换行 */
-.tb-rec-bar {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-  margin-top: 11px; padding: 8px 9px 8px 12px;
-  border-radius: 9px;
-  background: var(--primary-soft);
-}
-.tb-rec-bar-text {
-  flex: 1; min-width: 190px;
-  display: flex; align-items: flex-start; gap: 6px;
-  font-size: 11.5px; line-height: 1.6; color: var(--text-2);
-}
-.tb-rec-bar-text > span { flex: 1; }
-.tb-rec-bar-text svg { flex: none; margin-top: 2px; color: var(--primary); }
-.tb-rec-bar-actions { flex: none; display: flex; gap: 7px; margin-left: auto; }
-
 /* —— FFmpeg 工具模块 —— */
 /* 面板是卡片里的一个分节,不再自己套一层框 —— 卡片里套方框会显得很闷。
    分节之间用一条细线断开,和设置页的 .divider 是同一套做法 */
@@ -1344,3 +1298,24 @@ h1, h2, h3, p { margin: 0; }
 
 /* 结果条文案可能有多行(提示文案不留句号,改用换行分隔句子) */
 .tb-result-bar > span { white-space: pre-line; }
+
+/* ============================================================ 推荐页 */
+/* 复用设置页的 .settings-layout / .settings-nav / .snav-item 两栏骨架,
+   这里只补右侧详情区自己的样式 */
+.rec-detail { display: flex; flex-direction: column; align-items: flex-start; }
+.rec-detail-desc {
+  margin: 0 0 12px;
+  font-size: 13px; line-height: 1.8; color: var(--text-2);
+}
+.rec-detail-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+  width: 100%; margin-top: 13px; padding-top: 13px;
+  border-top: 1px solid var(--border);
+}
+.rec-host {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--text-3);
+}
+.rec-host svg { flex: none; }
+.rec-detail-actions { display: flex; gap: 8px; }

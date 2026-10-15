@@ -104,7 +104,7 @@ const STATUS_CLASS: Record<string, string> = { 等待中: 'waiting', 准备中: 
  */
 interface AppState {
   // —— 视图状态:取值封闭,收成联合类型 ——
-  page: 'downloads' | 'settings' | 'toolbox' | 'about'
+  page: 'downloads' | 'settings' | 'toolbox' | 'recommend' | 'about'
   theme: 'light' | 'dark'
   queueStep: 'add' | 'list'
   linkMode: 'batch' | 'single'
@@ -199,6 +199,9 @@ interface AppState {
   toolboxCompressVideo: string
   /** 分离有自己的一份输入 —— 和合并共用会让用户不知道分离的是哪个文件 */
   toolboxSplitVideo: string
+  /** 推荐页左侧选中的那一条 */
+  recommendId: string
+
   /** 当前(或最近一次)任务属于哪个面板:merge / split / compress。
       进度与结果都渲染在它对应的面板里,不让用户去卡片底部找 */
   toolboxPhase: string
@@ -253,6 +256,7 @@ const state: AppState = {
   ffmpegPhase: '',
   ffmpegMessage: '',
   settingsSection: 'location',
+  recommendId: '',
   settingsDirty: false,
   settingsBaseline: null,
   enterAnim: false,
@@ -408,6 +412,7 @@ function render() {
           <nav class="nav">
             <button class="nav-item ${state.page === 'downloads' ? 'active' : ''}" data-page="downloads">${icon('download')}<span>下载队列</span><em>${state.tasks.length || ''}</em></button>
             <button class="nav-item ${state.page === 'settings' ? 'active' : ''}" data-page="settings">${icon('settings')}<span>设置</span></button>
+            <button class="nav-item ${state.page === 'recommend' ? 'active' : ''}" data-page="recommend">${icon('shield')}<span>推荐</span></button>
             <button class="nav-item ${state.page === 'toolbox' ? 'active' : ''}" data-page="toolbox">${icon('toolbox')}<span>百宝箱</span></button>
             <button class="nav-item ${state.page === 'about' ? 'active' : ''}" data-page="about">${icon('info')}<span>关于</span>${state.updateHas ? '<i class="nav-badge"></i>' : ''}</button>
           </nav>
@@ -421,7 +426,7 @@ function render() {
         </aside>
         <main class="main">
           <div class="content ${state.enterAnim ? 'page-enter' : ''}">
-            <div class="page">${state.page === 'downloads' ? renderDownloads() : state.page === 'settings' ? renderSettings() : state.page === 'toolbox' ? renderToolbox() : renderAbout()}</div>
+            <div class="page">${state.page === 'downloads' ? renderDownloads() : state.page === 'settings' ? renderSettings() : state.page === 'toolbox' ? renderToolbox() : state.page === 'recommend' ? renderRecommend() : renderAbout()}</div>
           </div>
           ${renderStatusbar()}
         </main>
@@ -852,6 +857,8 @@ function renderUpdateBlock() {
 // 推荐项。后续要加新推荐,往这个数组里加一项就行,渲染和事件都不用动。
 // url 必须带主机名,打开前会过一遍后端白名单校验。
 interface ToolboxRecommend {
+  /** 左侧列表与详情标题用的图标,不填就用 shield */
+  icon?: string
   id: string
   name: string
   kind: string        // 类型标签,如「浏览器脚本」
@@ -876,32 +883,41 @@ function recommendHost(url: string) {
   try { return new URL(url).hostname } catch { return url }
 }
 
-/** 推荐框:一条推荐一张卡,和程序里其它卡片同一套语言 */
-function renderToolboxRecommend() {
-  return `<div class="tb-card">
-    <div class="tb-card-head">
-      <span class="tb-card-icon">${icon('shield', 18)}</span>
-      <div><h2>推荐</h2><span class="card-sub">下载之外，这些也值得装</span></div>
+/** 推荐:独立一页,布局与设置页一致 —— 左侧一条推荐一项,右侧看详情 */
+function renderRecommend() {
+  const rec = TOOLBOX_RECOMMENDS.find(r => r.id === state.recommendId) || TOOLBOX_RECOMMENDS[0]
+  return `
+    <div class="settings-head">
+      <h1>推荐</h1>
     </div>
-    <div class="tb-rec-list">
-      ${TOOLBOX_RECOMMENDS.map(rec => `
-      <article class="tb-rec">
-        <div class="tb-rec-top">
-          <b class="tb-rec-name">${safe(rec.name)}</b>
-          <span class="tb-rec-kind">${safe(rec.kind)}</span>
-          <span class="tb-rec-host">${icon('link', 12)}${safe(recommendHost(rec.url))}</span>
+    <div class="settings-layout">
+      <nav class="settings-nav">
+        ${TOOLBOX_RECOMMENDS.map(r => `
+          <button class="snav-item ${r.id === rec?.id ? 'active' : ''}" data-rec-id="${safe(r.id)}">
+            <span class="snav-icon">${icon(r.icon || 'shield', 17)}</span>
+            <span class="snav-copy"><b>${safe(r.name)}</b><small>${safe(r.kind)}</small></span>
+          </button>`).join('')}
+      </nav>
+      <section class="settings-content">
+        ${rec ? `
+        <div class="set-head">
+          <span class="set-head-icon">${icon(rec.icon || 'shield', 18)}</span>
+          <div><h2>${safe(rec.name)}</h2><p>${safe(rec.kind)}</p></div>
         </div>
-        <p class="tb-rec-desc">${safe(rec.desc)}</p>
-        <div class="tb-rec-bar">
-          ${rec.tip ? `<span class="tb-rec-bar-text">${icon('checkcircle', 13)}<span>${safe(rec.tip)}</span></span>` : '<span class="tb-rec-bar-text"></span>'}
-          <span class="tb-rec-bar-actions">
-            <button class="btn btn-primary btn-sm" data-rec-open="${safe(rec.id)}">${icon('external', 13)}打开链接</button>
-            <button class="btn btn-ghost btn-sm" data-rec-copy="${safe(rec.id)}">${icon('clipboard', 13)}复制地址</button>
-          </span>
-        </div>
-      </article>`).join('')}
+        <div class="rec-detail">
+          <p class="rec-detail-desc">${safe(rec.desc)}</p>
+          ${rec.tip ? `<p class="tb-note">${icon('checkcircle', 13)}<span>${safe(rec.tip)}</span></p>` : ''}
+          <div class="rec-detail-foot">
+            <span class="rec-host">${icon('link', 13)}${safe(recommendHost(rec.url))}</span>
+            <span class="rec-detail-actions">
+              <button class="btn btn-primary btn-sm" data-rec-open="${safe(rec.id)}">${icon('external', 13)}打开链接</button>
+              <button class="btn btn-ghost btn-sm" data-rec-copy="${safe(rec.id)}">${icon('clipboard', 13)}复制地址</button>
+            </span>
+          </div>
+        </div>` : `<div class="empty"><span class="empty-icon">${icon('shield', 22)}</span><b>还没有推荐内容</b></div>`}
+      </section>
     </div>
-  </div>`
+  `
 }
 
 /** FFmpeg 工具箱:合并 / 分离 */
@@ -1064,7 +1080,6 @@ function renderToolboxFFmpeg() {
 
 function renderToolbox() {
   return `<div class="tb-wrap">
-    ${renderToolboxRecommend()}
     ${renderToolboxFFmpeg()}
   </div>`
 }
@@ -1295,6 +1310,12 @@ root.addEventListener('click', event => {
   const cookieImport = (event.target as HTMLElement).closest<HTMLElement>('[data-cookie-import]')
   if (cookieImport) { importPlatformCookie(cookieImport.dataset.cookieImport!); return }
   // 百宝箱:推荐的操作按钮(用委托,加新推荐不用动这里)
+  const recItem = (event.target as HTMLElement).closest<HTMLElement>('[data-rec-id]')
+  if (recItem) {
+    state.recommendId = recItem.dataset.recId || ''
+    render()
+    return
+  }
   const recOpen = (event.target as HTMLElement).closest<HTMLElement>('[data-rec-open]')
   if (recOpen) {
     const rec = TOOLBOX_RECOMMENDS.find(r => r.id === recOpen.dataset.recOpen)
