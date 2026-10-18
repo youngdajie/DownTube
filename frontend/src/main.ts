@@ -422,6 +422,10 @@ function renderPage() {
   if (scrollReset) { content.scrollTop = 0; scrollReset = false }
 
   // 页面的「首次进入」钩子,与 render() 保持一致
+  // 页面元素是新的,必须重新绑事件 —— 否则保存/撤销/测试连接这些
+  // 直接绑在元素上的按钮会全部失效(上一版就是这么坏的)
+  bindPage()
+
   if (state.page === 'settings' && state.settingsSection === 'format') refreshEncoderHint()
   if (state.page === 'toolbox' && !state.toolboxCompressFormats.length) loadToolboxCompressOptions()
 }
@@ -564,9 +568,8 @@ function renderAddView() {
     <div class="sites-note">
       <div class="sites-head"><b>支持的站点</b><span>下载内核为 yt-dlp，只要它支持，这里多半也能下</span></div>
       <div class="sites-group"><span class="sites-label">最佳</span><p class="sites-best"><b>YouTube</b><b>哔哩哔哩</b></p></div>
-      <div class="sites-group"><span class="sites-label">其他</span><p class="sites-weak">抖音、西瓜视频、优酷、爱奇艺、腾讯视频、芒果TV、微博、TikTok、Twitter/X、Instagram、Facebook、Vimeo、Twitch、Reddit、Dailymotion</p></div>
-      <div class="sites-group"><span class="sites-label">音乐</span><p class="sites-weak">SoundCloud、Bandcamp、网易云音乐、QQ音乐</p></div>
-      <p class="sites-caveat">YouTube 与哔哩哔哩适配最充分，画质选项、字幕、播放列表和 Cookies 都按这两个站点调过；抖音视频建议用左侧<b>「百宝箱」</b>里的 Edge 插件下载，效果更好。站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入。另外，<b>播放列表、频道、合集与 UP 主空间的链接会把它下面的每个视频都逐个下载</b>，而队列里只显示一条任务，可能需要非常久。</p>
+      <div class="sites-group"><span class="sites-label">其他</span><p class="sites-weak">其他网站的资源自测</p></div>
+      <p class="sites-caveat">YouTube 与哔哩哔哩适配最充分，画质选项、字幕、播放列表和 Cookies 都按这两个站点调过；抖音视频建议用左侧<b>「百宝箱」</b>里的 Edge 插件下载，效果更好；站点改版、地区限制、需要登录或会员内容都可能解析失败，<b>不保证每个链接都能下载</b>；需要登录的内容（如 YouTube 年龄限制、哔哩哔哩大会员）请到「设置 → Cookies」按站点导入；另外<b>播放列表、频道、合集与 UP 主空间的链接会把它下面的每个视频都逐个下载</b>，而队列里只显示一条任务，可能需要非常久</p>
     </div>
   </div>`
 }
@@ -748,13 +751,14 @@ function renderSettingsSection(id: string) {
   if (id === 'network') {
     return `
       <div class="set-card">
-        <div class="set-card-head"><b>代理连接</b><p>通过本机代理访问站点，适用于网络受限的环境</p></div>
+        <div class="set-card-head"><b>代理连接</b><p>下载内核默认就走系统代理；这里只在需要换一个代理地址时才用</p></div>
         <div class="set-card-body">
           <div class="row-split">
-            <div class="row-split-copy"><b>使用代理</b><small>下载与解析均通过指定代理连接</small></div>
+            <div class="row-split-copy"><b>使用代理</b><small>关闭时跟随系统代理；开启时强制使用下方地址，覆盖系统设置</small></div>
             <label class="switch"><input id="proxyToggle" type="checkbox" ${state.useProxy ? 'checked' : ''}><span></span></label>
           </div>
           <label class="field ${state.useProxy ? '' : 'hidden'}" id="proxyAddressField"><span>代理地址</span><input id="proxyURL" class="input" value="${safe(state.proxyURL)}" placeholder="http://127.0.0.1:10809" /></label>
+          <p class="field-hint ${state.useProxy ? '' : 'hidden'}" id="proxyHint">系统代理开着时，不开启这里也能正常下载；只有想走另一个端口或地址时才需要填</p>
           <div class="row-split">
             <div class="row-split-copy"><b>启动时检测代理</b><small>启动时确认代理端口是否可连接</small></div>
             <label class="switch"><input id="autoDetectToggle" type="checkbox" ${state.autoDetectProxy ? 'checked' : ''}><span></span></label>
@@ -1087,7 +1091,7 @@ function renderToolboxFFmpeg() {
       </div>
       ${toolboxTaskArea('split')}
     </div>
-    <p class="tb-note">${icon('info', 13)}<span>两个操作都是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变。想让文件变小请用下面的「视频压缩」</span></p>
+    <p class="tb-note">${icon('info', 13)}<span>两个操作都是<b>无损流复制</b>：不重新编码，瞬间完成，画质不变；想让文件变小请用下面的「视频压缩」</span></p>
 
     <div class="tb-panel">
       <div class="tb-panel-title">${icon('package', 15)}视频压缩</div>
@@ -1171,7 +1175,7 @@ function renderAbout() {
         </div>
       </div>
     </div>
-    <p class="about-note">任务与设置仅保存在本机，不会上传或收集任何链接。本工具不提供视频内容，请仅下载你有权保存的内容，并遵守相关网站的服务条款与版权规则</p>
+    <p class="about-note">任务与设置仅保存在本机，不会上传或收集任何链接；本工具不提供视频内容，请仅下载你有权保存的内容，并遵守相关网站的服务条款与版权规则</p>
   </div>`
 }
 
@@ -1445,6 +1449,14 @@ root.addEventListener('keydown', event => {
 document.addEventListener('pointerdown', event => { if (!(event.target as HTMLElement).closest<HTMLElement>('.md-select')) closeAllSelects() })
 
 function bind() {
+  bindShell()
+  bindPage()
+}
+
+/** 常驻元素:标题栏与 FFmpeg 弹窗。它们不随页面切换重建,
+    所以**只能在全量 render 后绑一次** —— 重复绑会让一次点击触发两遍,
+    像主题切换这种「取反」操作就会互相抵消,表现成点了没反应 */
+function bindShell() {
   // 标题栏
   $('#themeToggle')?.addEventListener('click', toggleTheme)
   $('#minimizeWindow')?.addEventListener('click', () => window.runtime?.WindowMinimise?.())
@@ -1455,6 +1467,18 @@ function bind() {
     window.runtime?.WindowToggleMaximise?.(); setTimeout(syncWindowButtons, 80)
   })
 
+  // FFmpeg 弹窗
+  $('#closeFFmpegModal')?.addEventListener('click', closeFFmpegModal)
+  $('#ffmpegModalCancel')?.addEventListener('click', closeFFmpegModal)
+  $('#ffmpegBackdrop')?.addEventListener('click', e => { if ((e.target as HTMLElement).id === 'ffmpegBackdrop') closeFFmpegModal() })
+  $('#ffmpegAutoInstall')?.addEventListener('click', installFFmpeg)
+  $('#ffmpegImportArchive')?.addEventListener('click', importFFmpegArchive)
+  $('#ffmpegPickFile')?.addEventListener('click', pickFFmpegFile)
+}
+
+/** 页面内容:`.page` 每次重绘后元素都是新的,必须重新绑。
+    render() 与 renderPage() 都会调它 */
+function bindPage() {
   // 下载页
   $('#stepAdd')?.addEventListener('click', () => {
     if (state.queueStep !== 'add') { state.queueStep = 'add'; scrollReset = true; render(); $('#linkInput')?.focus() }
@@ -1492,6 +1516,7 @@ function bind() {
     state.useProxy = (e.target as HTMLInputElement).checked
     state.settingsDirty = true
     $('#proxyAddressField')?.classList.toggle('hidden', !(e.target as HTMLInputElement).checked)
+    $('#proxyHint')?.classList.toggle('hidden', !(e.target as HTMLInputElement).checked)
   })
   $('#autoDetectToggle')?.addEventListener('change', e => { state.autoDetectProxy = (e.target as HTMLInputElement).checked; state.settingsDirty = true })
   $('#proxyURL')?.addEventListener('change', e => { state.proxyURL = (e.target as HTMLInputElement).value; state.settingsDirty = true })
@@ -1540,13 +1565,6 @@ function bind() {
     if (url) backend()?.OpenUpdatePage?.(url)
   })
 
-  // FFmpeg 弹窗
-  $('#closeFFmpegModal')?.addEventListener('click', closeFFmpegModal)
-  $('#ffmpegModalCancel')?.addEventListener('click', closeFFmpegModal)
-  $('#ffmpegBackdrop')?.addEventListener('click', e => { if ((e.target as HTMLElement).id === 'ffmpegBackdrop') closeFFmpegModal() })
-  $('#ffmpegAutoInstall')?.addEventListener('click', installFFmpeg)
-  $('#ffmpegImportArchive')?.addEventListener('click', importFFmpegArchive)
-  $('#ffmpegPickFile')?.addEventListener('click', pickFFmpegFile)
 }
 
 async function syncWindowButtons() {
@@ -1843,7 +1861,7 @@ function captureSettingsBaseline() {
 function revertSettings() {
   if (!state.settingsBaseline) { toast('没有可撤销的修改'); return }
   Object.assign(state, state.settingsBaseline, { settingsDirty: false })
-  render(); toast('已撤销未保存的修改')
+  renderPage(); toast('已撤销未保存的修改')
 }
 function resetSettings() {
   state.quality = '1080p'
@@ -1858,7 +1876,7 @@ function resetSettings() {
   state.videoCodec = 'auto'
   state.hevcEncoder = 'auto'
   state.settingsDirty = true
-  render(); toast('已恢复默认值，点击「保存」生效')
+  renderPage(); toast('已恢复默认值，点击「保存」生效')
 }
 
 async function browse() {
@@ -2008,7 +2026,7 @@ async function saveSettings() {
   state.encoderHint = ''
   state.settingsBaseline = settingsSnapshot()
   await refreshSystemStatus()
-  render(); toast('设置已保存到本机')
+  renderPage(); toast('设置已保存到本机')
 }
 
 // 检测并展示可用的 H.265 显卡编码器(探测结果由后端缓存,仅首次较慢)
@@ -2039,7 +2057,7 @@ async function testProxy() {
       state.proxyChecked = true
       state.proxyReady = !!result.ok
       state.proxyMessage = result.message
-      render(); toast(result.message)
+      renderPage(); toast(result.message)
     } catch (error) { toast(`代理测试失败：${(error as Error).message}`) }
   } else toast('代理测试仅在桌面版可用')
 }
