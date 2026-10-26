@@ -129,12 +129,14 @@ h1, h2, h3, p { margin: 0; }
    标题栏加高到 54px、底部留 18px padding,让按钮浮在波浪上方(间距 6px,
    是按按钮高 32px 与波浪高 14px 算出来的)。 */
 .titlebar {
-  height: 54px;
+  height: 50px;
   flex: none;
   display: flex;
   align-items: stretch;
   background: var(--bg);
   position: relative;
+  /* 内容盒 50-18=32,32px 的按钮铺满 0~32;波浪在 36~50,间距 4px。
+     比上一版矮 4px、波浪整体上移 4px,顶部的比例更稳 */
   padding-bottom: 18px;
   --wails-draggable: drag;
 }
@@ -206,19 +208,18 @@ h1, h2, h3, p { margin: 0; }
   padding: 0 10px 0 6px;
   --wails-draggable: no-drag;
 }
+/* 昼夜切换就是个裸图标:不要边框、不要底色、不要 hover 变化。
+   保留 32px 点击区域只是为了好点,视觉上只有那枚图标 */
 .theme-toggle {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--border-2);
-  background: var(--surface);
+  border: 0;
+  background: none;
   color: var(--text-2);
   display: grid;
   place-items: center;
-  transition: background .15s, color .15s, border-color .15s, transform .12s;
+  transition: none;
 }
-.theme-toggle:hover { background: var(--surface-3); color: var(--text); }
-.theme-toggle:active { transform: scale(.93); }
 
 .window-controls { display: flex; align-items: stretch; --wails-draggable: no-drag; }
 .window-control {
