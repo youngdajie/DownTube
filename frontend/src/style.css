@@ -135,9 +135,13 @@ h1, h2, h3, p { margin: 0; }
   align-items: stretch;
   background: var(--bg);
   position: relative;
-  /* 内容盒 50-18=32,32px 的按钮铺满 0~32;波浪在 36~50,间距 4px。
-     比上一版矮 4px、波浪整体上移 4px,顶部的比例更稳 */
-  padding-bottom: 18px;
+  /* 让内容在「顶部边缘 ~ 波浪上沿」之间**垂直居中**。
+     视觉区 = 0~36(50 - 14 波浪高),内容盒 32px,上下各留 2px:
+       上 padding 2 → 内容盒 2~34
+       波浪 36~50
+     也就是 padding: 2px 0 16px。
+     之前是 0~32(上 0 下 4),所以看着偏上 —— 这次把上方的呼吸补回来 */
+  padding: 2px 0 16px;
   --wails-draggable: drag;
 }
 .titlebar-wave {
