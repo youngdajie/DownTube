@@ -336,16 +336,31 @@ const shortURL = (url: string) => String(url || '').replace(/^https?:\/\//, '').
 // ============================================================
 // 主题
 // ============================================================
+let themeRaf = 0
+
 function toggleTheme() {
   const next = state.theme === 'dark' ? 'light' : 'dark'
   state.theme = next
-  document.documentElement.dataset.theme = next
   try { localStorage.setItem('downtube-theme', next) } catch { /* 存储不可用时仅本次生效 */ }
+
+  // 连点时合并到同一帧。改 <html data-theme> 会让整份样式失效重算,
+  // 每次点击都同步改的话,疯狂点击时会连着触发整页重算而掉帧。
+  // 状态照样每次取反,只把「落到 DOM」压成一帧一次。
+  if (themeRaf) return
+  themeRaf = requestAnimationFrame(() => {
+    themeRaf = 0
+    applyTheme(state.theme)
+  })
+}
+
+/** 把主题真正落到 DOM 上(与状态解耦,便于按帧合并) */
+function applyTheme(theme: string) {
+  document.documentElement.dataset.theme = theme
   const button = $('#themeToggle')
-  if (button) {
-    button.innerHTML = icon(next === 'dark' ? 'sun' : 'moon', 16)
-    button.title = next === 'dark' ? '切换到浅色模式' : '切换到深色模式'
-  }
+  if (!button) return
+  button.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon', 16)
+  button.title = theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'
+  button.setAttribute('aria-label', button.title)
 }
 
 // ============================================================

@@ -73,6 +73,10 @@
 
 /* ---------- 基础 ---------- */
 * { box-sizing: border-box; }
+/* 注意:大面积容器(.app-window / .sidebar / .statusbar / .card / .set-card /
+   .about-card)**不要**加 background-color 过渡。切主题时它们会全部同时补间,
+   卡片一多就掉帧 —— 表现就是疯狂点昼夜切换时「闪屏」。
+   主题切换要做到瞬时、干脆。 */
 html, body { height: 100%; }
 body {
   margin: 0;
@@ -115,7 +119,6 @@ h1, h2, h3, p { margin: 0; }
   display: flex;
   flex-direction: column;
   background: var(--bg);
-  transition: background-color .2s ease;
 }
 
 /* 标题栏:左侧留白可拖拽,右侧为昼夜切换与窗口控制 */
@@ -249,7 +252,6 @@ h1, h2, h3, p { margin: 0; }
   padding: 14px 12px 12px;
   background: var(--surface);
   border-right: 1px solid var(--border);
-  transition: background-color .2s ease;
 }
 .nav { display: grid; gap: 3px; }
 .nav-item {
@@ -306,7 +308,6 @@ h1, h2, h3, p { margin: 0; }
   border-top: 1px solid var(--border);
   color: var(--text-3);
   font-size: 11px;
-  transition: background-color .2s ease;
 }
 .statusbar-left { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; white-space: nowrap; }
 .led { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
@@ -321,7 +322,6 @@ h1, h2, h3, p { margin: 0; }
   border-radius: 12px;
   background: var(--surface);
   overflow: hidden;
-  transition: background-color .2s ease, border-color .2s ease;
 }
 .card-head {
   display: flex;
@@ -844,7 +844,7 @@ h1, h2, h3, p { margin: 0; }
 .set-head h2 { font-size: 15px; font-weight: 600; color: var(--text); }
 .set-head p { font-size: 12px; color: var(--text-3); margin-top: 3px; }
 
-.set-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 18px; transition: background-color .2s ease, border-color .2s ease; }
+.set-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 18px; }
 .set-card-head { margin-bottom: 14px; }
 .set-card-head b { display: block; font-size: 13px; font-weight: 600; color: var(--text); }
 .set-card-head p { font-size: 11.5px; color: var(--text-3); margin-top: 4px; }
@@ -970,7 +970,6 @@ h1, h2, h3, p { margin: 0; }
   border-radius: 14px;
   background: var(--surface);
   padding: 26px 28px 28px;
-  transition: background-color .2s ease, border-color .2s ease;
 }
 .about-brand { display: flex; align-items: center; gap: 16px; }
 .about-logo { width: 56px; height: 56px; border-radius: 14px; }
