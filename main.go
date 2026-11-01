@@ -180,6 +180,20 @@ func (a *App) startup(ctx context.Context) {
 	for _, j := range jobs {
 		a.resolveTitleAsync(j.id, j.url, false)
 	}
+	// 后台预热 yt-dlp 版本:跑一次 --version 要近 1 秒,放后台做,
+	// 免得拖慢首屏。查完推一个事件,前端拿到就补上版本标识。
+	go func() {
+		engine, err := findYTDLP()
+		if err != nil {
+			return
+		}
+		ver := probeYTDLPVersion(engine)
+		if ver == "" {
+			return
+		}
+		// 首屏那次 GetSystemStatus 可能早于预热完成,这里补一发
+		runtime.EventsEmit(ctx, "engine:version", ver)
+	}()
 }
 
 func (a *App) ReportFrontendError(message string) { log.Printf("frontend error: %s", message) }
@@ -267,7 +281,8 @@ func (a *App) GetSystemStatus() SystemStatus {
 	}
 	return SystemStatus{
 		EngineReady: err == nil, EnginePath: engine, EngineError: errorText(err),
-		FFmpegReady: ffmpegErr == nil, FFmpegPath: ffmpeg, FFmpegError: errorText(ffmpegErr), FFmpegVersion: ffmpegLabel,
+		EngineVersion: cachedYTDLPVersion(engine),
+		FFmpegReady:   ffmpegErr == nil, FFmpegPath: ffmpeg, FFmpegError: errorText(ffmpegErr), FFmpegVersion: ffmpegLabel,
 		ProxyChecked: proxyEnabled && autoDetect, ProxyReady: proxyOK, ProxyMessage: proxyMessage,
 		DataDir: dataDir,
 	}
@@ -402,6 +417,63 @@ func findYTDLP() (string, error) {
 		return path, nil
 	}
 	return "", errors.New("未找到 yt-dlp。请将 yt-dlp.exe 放在程序目录或加入 PATH")
+}
+
+// —— yt-dlp 版本 ——
+//
+// 跑一次 `yt-dlp.exe --version` 要接近 1 秒(PyInstaller 每次自解压),
+// 而 GetSystemStatus 会被反复调用 —— 绝不能放在里面同步查。
+// 做法:启动时后台预热一次,状态查询只读缓存。
+// 缓存键带上文件大小与修改时间,换了内核会自动失效重查。
+var (
+	ytdlpVerMu    sync.Mutex
+	ytdlpVerCache = map[string]string{}
+)
+
+func ytdlpVerKey(path string) (string, bool) {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	return fmt.Sprintf("%s|%d|%d", path, info.Size(), info.ModTime().UnixNano()), true
+}
+
+// cachedYTDLPVersion 只读缓存,永不阻塞;没查过就返回空串。
+func cachedYTDLPVersion(path string) string {
+	key, ok := ytdlpVerKey(path)
+	if !ok {
+		return ""
+	}
+	ytdlpVerMu.Lock()
+	defer ytdlpVerMu.Unlock()
+	return ytdlpVerCache[key]
+}
+
+// probeYTDLPVersion 真实查一次并写缓存(约 1 秒),只在启动预热时调用。
+func probeYTDLPVersion(path string) string {
+	key, ok := ytdlpVerKey(path)
+	if !ok {
+		return ""
+	}
+	if v := cachedYTDLPVersion(path); v != "" {
+		return v
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "--version")
+	hideConsoleWindow(cmd)
+	out, err := cmd.Output()
+	ver := ""
+	if err == nil {
+		ver = strings.TrimSpace(string(out))
+		if i := strings.IndexByte(ver, '\n'); i > 0 {
+			ver = strings.TrimSpace(ver[:i])
+		}
+	}
+	ytdlpVerMu.Lock()
+	ytdlpVerCache[key] = ver
+	ytdlpVerMu.Unlock()
+	return ver
 }
 
 func errorText(err error) string {

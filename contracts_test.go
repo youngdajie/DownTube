@@ -97,11 +97,11 @@ func TestContractKeysUnchanged(t *testing.T) {
 		{
 			name: "GetSystemStatus",
 			old: map[string]any{
-				"engineReady": true, "enginePath": "e", "engineError": "", "ffmpegReady": true,
+				"engineReady": true, "enginePath": "e", "engineError": "", "engineVersion": "v", "ffmpegReady": true,
 				"ffmpegPath": "f", "ffmpegError": "", "ffmpegVersion": "v",
 				"proxyChecked": true, "proxyReady": false, "proxyMessage": "m", "dataDir": "d",
 			},
-			new: SystemStatus{EngineReady: true, EnginePath: "e", FFmpegReady: true, FFmpegPath: "f",
+			new: SystemStatus{EngineReady: true, EnginePath: "e", EngineVersion: "v", FFmpegReady: true, FFmpegPath: "f",
 				FFmpegVersion: "v", ProxyChecked: true, ProxyReady: false, ProxyMessage: "m", DataDir: "d"},
 		},
 		{
@@ -278,7 +278,7 @@ func TestSystemStatusLiveFields(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("反序列化失败: %v", err)
 	}
-	want := []string{"dataDir", "engineError", "enginePath", "engineReady", "ffmpegError",
+	want := []string{"dataDir", "engineError", "enginePath", "engineReady", "engineVersion", "ffmpegError",
 		"ffmpegPath", "ffmpegReady", "ffmpegVersion", "proxyChecked", "proxyMessage", "proxyReady"}
 	if len(got) != len(want) {
 		t.Fatalf("键数不对\n  期望 %d 个: %v\n  实际 %d 个: %v", len(want), want, len(got), keysOf(got))

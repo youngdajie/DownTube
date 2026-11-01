@@ -142,6 +142,8 @@ interface AppState {
   // —— 内核与 FFmpeg ——
   encoderHint: string
   engineReady: boolean
+  /** yt-dlp 版本(后端后台预热后填入,启动瞬间可能为空) */
+  engineVersion: string
   engineError: string
   ffmpegReady: boolean
   ffmpegPath: string
@@ -241,6 +243,7 @@ const state: AppState = {
   hevcEncoder: 'auto',
   encoderHint: '',
   engineReady: false,
+  engineVersion: '',
   engineError: '',
   ffmpegReady: false,
   ffmpegPath: '',
@@ -816,6 +819,7 @@ function renderSettingsSection(id: string) {
             <b>${state.engineReady ? '已就绪' : '未配置'}</b>
             <small>${state.engineReady ? 'yt-dlp.exe 已随程序提供，可直接使用' : safe(state.engineError || '将 yt-dlp.exe 放到程序目录，或加入系统 PATH')}</small>
           </div>
+          ${state.engineReady && state.engineVersion ? `<span class="engine-ver" title="yt-dlp 版本">${safe(state.engineVersion)}</span>` : ''}
           ${state.engineReady ? '' : `<button class="btn btn-ghost btn-sm" id="engineSetupBtn">获取 yt-dlp</button>`}
         </div>
       </div>
@@ -2071,6 +2075,7 @@ async function refreshSystemStatus() {
     const status = await backend()!.GetSystemStatus()
     state.engineReady = !!status.engineReady
     state.engineError = status.engineError || ''
+    state.engineVersion = status.engineVersion || state.engineVersion || ''
     state.ffmpegReady = !!status.ffmpegReady
     state.ffmpegPath = status.ffmpegPath || state.ffmpegPath
     state.ffmpegVersion = status.ffmpegVersion || ''
@@ -2422,6 +2427,12 @@ document.addEventListener('contextmenu', event => {
 window.addEventListener('resize', syncWindowButtons)
 
 if (window.runtime?.EventsOn) {
+  // yt-dlp 版本由后端后台预热(跑一次 --version 近 1 秒),查完推事件补上
+  window.runtime.EventsOn('engine:version', (ver) => {
+    if (typeof ver !== 'string' || !ver) return
+    state.engineVersion = ver
+    if (state.page === 'settings' && state.settingsSection === 'engine') renderPage()
+  })
   window.runtime.EventsOn('state:updated', (snapshot) => {
     applySnapshot(snapshot)
     if (state.page === 'downloads') patchDownloads()

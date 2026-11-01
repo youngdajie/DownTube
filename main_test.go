@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -280,5 +281,57 @@ func TestEngineErrorRuleOrder(t *testing.T) {
 		if !strings.Contains(got, c.wantSub) {
 			t.Errorf("%s\n  输入 %q\n  得到 %q, 期望包含 %q", c.why, c.raw, got, c.wantSub)
 		}
+	}
+}
+
+// TestYTDLPVersion 真实读一次随程序提供的 yt-dlp 版本。
+//
+// 这条要跑真实子进程(约 1 秒),所以用 -short 跳过。
+// 顺便验证缓存:第二次读必须命中缓存、明显更快。
+func TestYTDLPVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("需要跑 yt-dlp 子进程")
+	}
+	// 测试进程不在项目目录,先把 tools/yt-dlp.exe 摊到测试二进制旁边,
+	// 否则 findYTDLP 找不到(它是按运行中的可执行文件位置找的)
+	stageYtDlp(t)
+	engine, err := findYTDLP()
+	if err != nil {
+		t.Skipf("本机没有 yt-dlp: %v", err)
+	}
+
+	start := time.Now()
+	ver := probeYTDLPVersion(engine)
+	first := time.Since(start)
+	if ver == "" {
+		t.Fatalf("没读到版本,engine=%s", engine)
+	}
+	// yt-dlp 版本形如 2026.10.26
+	if !regexp.MustCompile(`^\d{4}\.\d{2}\.\d{2}`).MatchString(ver) {
+		t.Errorf("版本号格式不对: %q", ver)
+	}
+	t.Logf("yt-dlp 版本 = %s(首次耗时 %d ms)", ver, first.Milliseconds())
+
+	start = time.Now()
+	again := probeYTDLPVersion(engine)
+	second := time.Since(start)
+	if again != ver {
+		t.Errorf("两次读到的不一致: %q vs %q", ver, again)
+	}
+	if second > first/2 {
+		t.Errorf("第二次应命中缓存更快:首次 %d ms, 第二次 %d ms", first.Milliseconds(), second.Milliseconds())
+	}
+	t.Logf("缓存命中耗时 %d ms", second.Milliseconds())
+
+	// 只读缓存那条路径不能阻塞
+	if got := cachedYTDLPVersion(engine); got != ver {
+		t.Errorf("cachedYTDLPVersion = %q, 期望 %q", got, ver)
+	}
+	// 不存在的路径必须安静返回空,不能 panic
+	if got := cachedYTDLPVersion("Z:/不存在/yt-dlp.exe"); got != "" {
+		t.Errorf("不存在的路径应返回空串, 实际 %q", got)
+	}
+	if got := probeYTDLPVersion("Z:/不存在/yt-dlp.exe"); got != "" {
+		t.Errorf("不存在的路径应返回空串, 实际 %q", got)
 	}
 }

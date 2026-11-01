@@ -37,9 +37,11 @@ type UpdateInstallResult struct {
 
 // SystemStatus GetSystemStatus 的返回
 type SystemStatus struct {
-	EngineReady   bool   `json:"engineReady"`
-	EnginePath    string `json:"enginePath"`
-	EngineError   string `json:"engineError"`
+	EngineReady bool   `json:"engineReady"`
+	EnginePath  string `json:"enginePath"`
+	EngineError string `json:"engineError"`
+	// EngineVersion 由后台预热填入;查一次要近 1 秒,所以状态查询只读缓存、不阻塞
+	EngineVersion string `json:"engineVersion"`
 	FFmpegReady   bool   `json:"ffmpegReady"`
 	FFmpegPath    string `json:"ffmpegPath"`
 	FFmpegError   string `json:"ffmpegError"`

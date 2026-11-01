@@ -349,6 +349,7 @@ export namespace main {
 	}
 	export class SystemStatus {
 	    engineReady: boolean;
+	    engineVersion: string;
 	    enginePath: string;
 	    engineError: string;
 	    ffmpegReady: boolean;
@@ -367,6 +368,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.engineReady = source["engineReady"];
+	        this.engineVersion = source["engineVersion"];
 	        this.enginePath = source["enginePath"];
 	        this.engineError = source["engineError"];
 	        this.ffmpegReady = source["ffmpegReady"];
